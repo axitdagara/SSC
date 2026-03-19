@@ -24,6 +24,7 @@ export function Navbar({ isAuthenticated, user }) {
             <>
               <Link to="/dashboard">Dashboard</Link>
               <Link to="/players">Players</Link>
+              <Link to="/matches">Matches</Link>
               <Link to="/profile">Profile</Link>
               <Link to="/finance">Finance</Link>
               {user?.role === 'admin' && (

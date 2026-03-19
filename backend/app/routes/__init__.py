@@ -6,6 +6,7 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.admin import router as admin_router
 from app.routes.finance import router as finance_router
 from app.routes.notifications import router as notifications_router
+from app.routes.matches import router as matches_router
 
 __all__ = [
     "auth_router",
@@ -16,4 +17,5 @@ __all__ = [
     "admin_router",
     "finance_router",
     "notifications_router",
+    "matches_router",
 ]

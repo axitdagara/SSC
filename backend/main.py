@@ -14,6 +14,7 @@ from app.routes import (
     admin_router,
     finance_router,
     notifications_router,
+    matches_router,
 )
 
 # Initialize database
@@ -48,6 +49,7 @@ app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(finance_router)
 app.include_router(notifications_router)
+app.include_router(matches_router)
 
 
 @app.get("/")

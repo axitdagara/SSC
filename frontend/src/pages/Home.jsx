@@ -11,7 +11,7 @@ export function HomePage() {
           <p>Sculpt Soft Cricketers platform for performance, finances, match history, and smart club operations.</p>
           <div className={styles.buttons}>
             <Link to="/register" className={styles.primaryBtn}>
-              Get Started
+              Register
             </Link>
             <Link to="/login" className={styles.secondaryBtn}>
               Login

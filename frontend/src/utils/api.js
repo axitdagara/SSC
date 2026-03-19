@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 // Set up axios instance
 const api = axios.create({
@@ -101,6 +101,17 @@ export const financeService = {
   getTransactions: () => api.get('/finance/transactions'),
   addGuestFundExpense: (payload) => api.post('/finance/guest-fund', payload),
   addManualCredit: (payload) => api.post('/finance/manual-credit', payload),
+};
+
+export const matchesService = {
+  createMatch: (payload) => api.post('/matches', payload),
+  listMatches: () => api.get('/matches'),
+  getMatch: (matchId) => api.get(`/matches/${matchId}`),
+  setupTeams: (matchId, payload) => api.post(`/matches/${matchId}/teams`, payload),
+  startMatch: (matchId, payload) => api.post(`/matches/${matchId}/start`, payload),
+  recordBall: (matchId, payload) => api.post(`/matches/${matchId}/ball`, payload),
+  getScoreboard: (matchId, innings = 1) => api.get(`/matches/${matchId}/scoreboard?innings=${innings}`),
+  completeMatch: (matchId) => api.post(`/matches/${matchId}/complete`),
 };
 
 export default api;

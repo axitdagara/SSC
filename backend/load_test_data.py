@@ -23,12 +23,6 @@ def load_test_data():
     db = SessionLocal()
     
     try:
-        # Check if data already exists
-        existing_users = db.query(User).count()
-        if existing_users > 0:
-            print("✓ Database already has data. Skipping test data load.")
-            return
-        
         print("📊 Loading test data...")
         
         # Create sample players
@@ -99,13 +93,63 @@ def load_test_data():
                 "matches": 0,
             }
         ]
+
+        # Add 20 premium dummy players (mix of batsman and bowler)
+        premium_now = datetime.utcnow()
+        for i in range(1, 21):
+            is_batsman = i <= 10
+            players.append(
+                {
+                    "name": f"Premium Player {i:02d}",
+                    "email": f"premium{i:02d}@ssc.com",
+                    "password": hash_password("password123"),
+                    "jersey_number": 100 + i,
+                    "bio": "Premium Batsman" if is_batsman else "Premium Bowler",
+                    "runs": 1200 + (i * 45) if is_batsman else 320 + (i * 15),
+                    "matches": 30 + i,
+                    "wickets": 8 + (i % 6) if is_batsman else 55 + (i * 3),
+                    "centuries": 2 + (i % 4) if is_batsman else 0,
+                    "half_centuries": 6 + (i % 8) if is_batsman else 1 + (i % 3),
+                    "highest_score": 95 + (i * 4) if is_batsman else 42 + (i % 10),
+                    "is_premium": True,
+                    "premium_start_date": premium_now,
+                    "premium_expiry": premium_now + timedelta(days=30),
+                }
+            )
+
+        # Add 10 regular guest dummy players
+        for i in range(1, 11):
+            players.append(
+                {
+                    "name": f"Guest Player {i:02d}",
+                    "email": f"guest{i:02d}@ssc.com",
+                    "password": hash_password("password123"),
+                    "jersey_number": 200 + i,
+                    "bio": "Guest Regular Player",
+                    "runs": 140 + (i * 25),
+                    "matches": 8 + i,
+                    "wickets": 1 + (i % 4),
+                    "centuries": 0,
+                    "half_centuries": 0,
+                    "highest_score": 28 + (i * 3),
+                    "is_premium": False,
+                }
+            )
         
+        existing_emails = {
+            row[0] for row in db.query(User.email).all()
+        }
+        inserted_count = 0
+
         for player_data in players:
+            if player_data["email"] in existing_emails:
+                continue
             player = User(**player_data)
             db.add(player)
+            inserted_count += 1
         
         db.commit()
-        print(f"✓ Created {len(players)} sample players")
+        print(f"✓ Added {inserted_count} users (skipped existing emails)")
         
         # Add sample performance logs
         players = db.query(User).filter(User.role == "player").all()

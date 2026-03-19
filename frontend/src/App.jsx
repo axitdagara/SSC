@@ -8,10 +8,12 @@ import { PlayersPage } from './pages/Players';
 import { ProfilePage } from './pages/Profile';
 import { FinancePage } from './pages/Finance';
 import { AdminPage } from './pages/Admin';
+import { MatchesPage } from './pages/Matches';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
   const isAdmin = user?.role === 'admin';
 
   const updateAuthState = () => {
@@ -29,7 +31,9 @@ function App() {
   };
 
   useEffect(() => {
+    // Initial auth check from localStorage
     updateAuthState();
+    setIsLoading(false);
 
     // Listen for auth changes (login, logout)
     const handleAuthChange = () => {
@@ -45,14 +49,18 @@ function App() {
     };
   }, []);
 
+  if (isLoading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
+  }
+
   return (
     <BrowserRouter>
       <Navbar isAuthenticated={isAuthenticated} user={user} />
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<HomePage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" /> : <LoginPage />} />
+        <Route path="/register" element={isAuthenticated ? <Navigate to="/dashboard" /> : <RegisterPage />} />
 
         {/* Protected Routes */}
         {isAuthenticated ? (
@@ -62,6 +70,7 @@ function App() {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/player/:playerId" element={<ProfilePage />} />
             <Route path="/finance" element={<FinancePage />} />
+            <Route path="/matches" element={<MatchesPage />} />
             <Route path="/admin" element={isAdmin ? <AdminPage /> : <Navigate to="/dashboard" />} />
           </>
         ) : (
@@ -70,6 +79,7 @@ function App() {
             <Route path="/players" element={<Navigate to="/login" />} />
             <Route path="/profile" element={<Navigate to="/login" />} />
             <Route path="/finance" element={<Navigate to="/login" />} />
+            <Route path="/matches" element={<Navigate to="/login" />} />
             <Route path="/admin" element={<Navigate to="/login" />} />
           </>
         )}
