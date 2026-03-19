@@ -41,6 +41,41 @@ def ensure_premium_creator(db: Session, user: User):
         )
 
 
+def get_team_totals(db: Session, match_id: int):
+    events = db.query(BallEvent).filter(BallEvent.match_id == match_id).all()
+
+    team_a_runs = 0
+    team_b_runs = 0
+    team_a_wickets = 0
+    team_b_wickets = 0
+
+    for event in events:
+        total = event.runs_off_bat + event.extras
+        if event.batting_team == "A":
+            team_a_runs += total
+            if event.is_wicket:
+                team_a_wickets += 1
+        elif event.batting_team == "B":
+            team_b_runs += total
+            if event.is_wicket:
+                team_b_wickets += 1
+
+    return team_a_runs, team_b_runs, team_a_wickets, team_b_wickets
+
+
+def get_innings_teams(db: Session, match_id: int, default_team: str):
+    first_innings_event = (
+        db.query(BallEvent)
+        .filter(BallEvent.match_id == match_id, BallEvent.innings == 1)
+        .order_by(BallEvent.created_at.asc())
+        .first()
+    )
+
+    first_batting_team = first_innings_event.batting_team if first_innings_event else (default_team or "A")
+    second_batting_team = "B" if first_batting_team == "A" else "A"
+    return first_batting_team, second_batting_team
+
+
 def build_scoreboard(db: Session, match_obj: Match, innings: int):
     batting_team = match_obj.batting_team or "A"
     events = (
@@ -59,6 +94,8 @@ def build_scoreboard(db: Session, match_obj: Match, innings: int):
     overs_display = f"{completed_overs}.{balls_in_current_over}"
 
     recent_balls = []
+    over_map = {}
+
     for event in events[-18:]:
         ball_text = f"{event.over_number}.{event.ball_number} "
         if event.is_wicket:
@@ -69,15 +106,69 @@ def build_scoreboard(db: Session, match_obj: Match, innings: int):
             ball_text += str(event.runs_off_bat)
         recent_balls.append(ball_text)
 
+    for event in events:
+        if event.is_wicket:
+            result = "W"
+        elif event.extra_type:
+            result = f"{event.runs_off_bat + event.extras} ({event.extra_type})"
+        else:
+            result = str(event.runs_off_bat)
+
+        over_map.setdefault(event.over_number, []).append(f"{event.ball_number}:{result}")
+
+    if over_map:
+        current_over_number = max(over_map.keys())
+        current_over_balls = over_map.get(current_over_number, [])
+        past_overs = [
+            f"Over {over_no}: " + ", ".join(over_map[over_no])
+            for over_no in sorted(over_map.keys())
+            if over_no != current_over_number
+        ]
+    else:
+        current_over_number = 1
+        current_over_balls = []
+        past_overs = []
+
+    team_a_runs, team_b_runs, team_a_wickets, team_b_wickets = get_team_totals(db, match_obj.id)
+    first_team, second_team = get_innings_teams(db, match_obj.id, match_obj.batting_team or "A")
+
+    winner_team = None
+    result_text = None
+
+    if match_obj.status == "completed":
+        if team_a_runs == team_b_runs:
+            result_text = "Match tied"
+        else:
+            winner_code = "A" if team_a_runs > team_b_runs else "B"
+            winner_team = match_obj.team_a_name if winner_code == "A" else match_obj.team_b_name
+
+            if winner_code == second_team:
+                winner_player_count = get_batting_side_player_count(db, match_obj.id, winner_code)
+                winner_wickets = team_a_wickets if winner_code == "A" else team_b_wickets
+                wickets_in_hand = max(0, (winner_player_count - 1) - winner_wickets)
+                result_text = f"{winner_team} won by {wickets_in_hand} wicket{'s' if wickets_in_hand != 1 else ''}"
+            else:
+                margin = abs(team_a_runs - team_b_runs)
+                result_text = f"{winner_team} won by {margin} run{'s' if margin != 1 else ''}"
+
     return MatchScoreboardResponse(
         match_id=match_obj.id,
         innings=innings,
+        match_status=match_obj.status,
+        current_innings=match_obj.current_innings,
         batting_team=batting_team,
         total_runs=total_runs,
         wickets=wickets,
         legal_balls=legal_balls,
         overs_display=overs_display,
         recent_balls=recent_balls,
+        current_over_number=current_over_number,
+        current_over_balls=current_over_balls,
+        past_overs=past_overs,
+        team_a_runs=team_a_runs,
+        team_b_runs=team_b_runs,
+        winner_team=winner_team,
+        result_text=result_text,
     )
 
 
@@ -92,6 +183,14 @@ def get_next_delivery_position(db: Session, match_id: int, innings: int):
     over_number = (legal_balls // 6) + 1
     ball_number = (legal_balls % 6) + 1
     return over_number, ball_number
+
+
+def get_batting_side_player_count(db: Session, match_id: int, team: str):
+    return (
+        db.query(MatchPlayer)
+        .filter(MatchPlayer.match_id == match_id, MatchPlayer.team == team)
+        .count()
+    )
 
 
 @router.post("", response_model=MatchResponse)
@@ -256,16 +355,18 @@ async def record_ball_event(
     if payload.runs_off_bat < 0 or payload.extras < 0:
         raise HTTPException(status_code=400, detail="Runs and extras cannot be negative")
 
-    if payload.batting_team not in {"A", "B"}:
+    innings_in_use = match_obj.current_innings or payload.innings
+    batting_team_in_use = (match_obj.batting_team or payload.batting_team or "").upper().strip()
+    if batting_team_in_use not in {"A", "B"}:
         raise HTTPException(status_code=400, detail="batting_team must be A or B")
 
-    auto_over_number, auto_ball_number = get_next_delivery_position(db, match_id, payload.innings)
+    auto_over_number, auto_ball_number = get_next_delivery_position(db, match_id, innings_in_use)
     legal_ball = payload.extra_type not in {"wide", "no_ball"}
 
     # Enforce innings over limit for legal balls only
     current_legal = (
         db.query(BallEvent)
-        .filter(BallEvent.match_id == match_id, BallEvent.innings == payload.innings)
+        .filter(BallEvent.match_id == match_id, BallEvent.innings == innings_in_use)
         .filter(BallEvent.extra_type.is_(None) | (~BallEvent.extra_type.in_(["wide", "no_ball"])))
         .count()
     )
@@ -274,10 +375,10 @@ async def record_ball_event(
 
     event = BallEvent(
         match_id=match_id,
-        innings=payload.innings,
+        innings=innings_in_use,
         over_number=auto_over_number,
         ball_number=auto_ball_number,
-        batting_team=payload.batting_team,
+        batting_team=batting_team_in_use,
         striker_id=payload.striker_id,
         bowler_id=payload.bowler_id,
         runs_off_bat=payload.runs_off_bat,
@@ -292,18 +393,57 @@ async def record_ball_event(
     db.add(event)
     db.commit()
 
-    scoreboard = build_scoreboard(db, match_obj, payload.innings)
-    next_over_number, next_ball_number = get_next_delivery_position(db, match_id, payload.innings)
+    scoreboard = build_scoreboard(db, match_obj, innings_in_use)
+
+    innings_over = False
+    match_completed = False
+
+    team_player_count = get_batting_side_player_count(db, match_id, batting_team_in_use)
+    all_out_limit = max(1, team_player_count - 1)
+    if team_player_count > 0 and scoreboard.wickets >= all_out_limit:
+        innings_over = True
+        if innings_in_use == 1:
+            match_obj.current_innings = 2
+            match_obj.batting_team = "B" if batting_team_in_use == "A" else "A"
+            db.commit()
+            db.refresh(match_obj)
+        else:
+            match_obj.status = "completed"
+            db.commit()
+            db.refresh(match_obj)
+            match_completed = True
+
+    if not match_completed and innings_in_use == 2:
+        first_team, second_team = get_innings_teams(db, match_id, batting_team_in_use)
+        team_a_runs, team_b_runs, _, _ = get_team_totals(db, match_id)
+        first_score = team_a_runs if first_team == "A" else team_b_runs
+        second_score = team_a_runs if second_team == "A" else team_b_runs
+
+        if second_score > first_score:
+            match_obj.status = "completed"
+            db.commit()
+            db.refresh(match_obj)
+            match_completed = True
+            innings_over = True
+
+    next_innings = match_obj.current_innings or innings_in_use
+    next_over_number, next_ball_number = get_next_delivery_position(db, match_id, next_innings)
 
     return {
         "message": "Ball recorded",
+        "innings_over": innings_over,
+        "match_completed": match_completed,
+        "match_status": match_obj.status,
         "recorded_ball": {
+            "innings": innings_in_use,
             "over_number": auto_over_number,
             "ball_number": auto_ball_number,
         },
         "next_ball": {
+            "innings": next_innings,
             "over_number": next_over_number,
             "ball_number": next_ball_number,
+            "batting_team": match_obj.batting_team,
         },
         "scoreboard": scoreboard,
     }

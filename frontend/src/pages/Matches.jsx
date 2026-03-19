@@ -13,6 +13,7 @@ export function MatchesPage() {
   const [selectedMatchId, setSelectedMatchId] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [scoreboard, setScoreboard] = useState(null);
+  const [showPastOvers, setShowPastOvers] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -25,6 +26,8 @@ export function MatchesPage() {
 
   const [teamAIds, setTeamAIds] = useState([]);
   const [teamBIds, setTeamBIds] = useState([]);
+  const [teamASearch, setTeamASearch] = useState('');
+  const [teamBSearch, setTeamBSearch] = useState('');
   const [teamSource, setTeamSource] = useState('new');
   const [previousMatchId, setPreviousMatchId] = useState('');
 
@@ -70,14 +73,14 @@ export function MatchesPage() {
     if (!matchId) {
       setSelectedMatch(null);
       setScoreboard(null);
+      setShowPastOvers(false);
       return;
     }
 
     try {
-      const [detailRes, scoreRes] = await Promise.all([
-        matchesService.getMatch(matchId),
-        matchesService.getScoreboard(matchId, 1),
-      ]);
+      const detailRes = await matchesService.getMatch(matchId);
+      const inningsToShow = detailRes.data?.match?.current_innings || 1;
+      const scoreRes = await matchesService.getScoreboard(matchId, inningsToShow);
       setSelectedMatch(detailRes.data);
       setScoreboard(scoreRes.data);
 
@@ -104,17 +107,19 @@ export function MatchesPage() {
     }
 
     const timer = setInterval(() => {
+      const inningsToShow = selectedMatch?.match?.current_innings || 1;
       matchesService
-        .getScoreboard(selectedMatchId, 1)
+        .getScoreboard(selectedMatchId, inningsToShow)
         .then((res) => setScoreboard(res.data))
         .catch(() => null);
     }, 2000);
 
     return () => clearInterval(timer);
-  }, [selectedMatchId, currentStep]);
+  }, [selectedMatchId, currentStep, selectedMatch]);
 
   const handleSelectMatch = (match) => {
     setSelectedMatchId(match.id);
+    setShowPastOvers(false);
     setCurrentStep(match.status === 'setup' ? 2 : 3);
   };
 
@@ -231,9 +236,21 @@ export function MatchesPage() {
 
       const nextOver = res.data?.next_ball?.over_number;
       const nextBall = res.data?.next_ball?.ball_number;
+      const nextInnings = res.data?.next_ball?.innings;
+      const nextBattingTeam = res.data?.next_ball?.batting_team;
+
+      if (res.data?.innings_over && !res.data?.match_completed) {
+        setMessage('Innings over: all players are out. Switched to next innings.');
+      }
+
+      if (res.data?.match_completed) {
+        setMessage('Match completed: all players are out in current innings.');
+      }
 
       setBallForm((prev) => ({
         ...prev,
+        innings: nextInnings || prev.innings,
+        batting_team: nextBattingTeam || prev.batting_team,
         over_number: nextOver || prev.over_number,
         ball_number: nextBall || prev.ball_number,
         commentary: '',
@@ -249,6 +266,14 @@ export function MatchesPage() {
 
   const teamAOptions = players.filter((p) => !teamBIds.includes(String(p.id)));
   const teamBOptions = players.filter((p) => !teamAIds.includes(String(p.id)));
+  const filteredTeamAOptions = teamAOptions.filter((p) =>
+    p.name.toLowerCase().includes(teamASearch.toLowerCase())
+  );
+  const filteredTeamBOptions = teamBOptions.filter((p) =>
+    p.name.toLowerCase().includes(teamBSearch.toLowerCase())
+  );
+  const selectedTeamAPlayers = players.filter((p) => teamAIds.includes(String(p.id)));
+  const selectedTeamBPlayers = players.filter((p) => teamBIds.includes(String(p.id)));
   const reusableMatches = matches.filter((m) => m.id !== selectedMatchId);
 
   return (
@@ -397,29 +422,100 @@ export function MatchesPage() {
                 )}
 
                 <div className={styles.teamSetup}>
-                  <div>
-                    <label>Team A Players</label>
+                  <div className={styles.teamColumn}>
+                    <div className={styles.teamHeaderRow}>
+                      <label>Team A Players ({teamAIds.length})</label>
+                      <div className={styles.teamActions}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTeamAIds((prev) =>
+                              Array.from(new Set([...prev, ...filteredTeamAOptions.map((p) => String(p.id))]))
+                            )
+                          }
+                        >
+                          Select Visible
+                        </button>
+                        <button type="button" onClick={() => setTeamAIds([])}>Clear</button>
+                      </div>
+                    </div>
+                    <input
+                      className={styles.teamSearch}
+                      placeholder="Search Team A players"
+                      value={teamASearch}
+                      onChange={(e) => setTeamASearch(e.target.value)}
+                    />
                     <select
                       multiple
                       value={teamAIds}
                       onChange={(e) => setTeamAIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
                     >
-                      {teamAOptions.map((p) => (
+                      {filteredTeamAOptions.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
+
+                    <div className={styles.selectedList}>
+                      {selectedTeamAPlayers.map((p) => (
+                        <button
+                          key={`a-${p.id}`}
+                          type="button"
+                          className={styles.selectedChip}
+                          onClick={() => setTeamAIds((prev) => prev.filter((id) => id !== String(p.id)))}
+                        >
+                          {p.name} x
+                        </button>
+                      ))}
+                      {selectedTeamAPlayers.length === 0 && <span className={styles.note}>No players selected</span>}
+                    </div>
                   </div>
-                  <div>
-                    <label>Team B Players</label>
+
+                  <div className={styles.teamColumn}>
+                    <div className={styles.teamHeaderRow}>
+                      <label>Team B Players ({teamBIds.length})</label>
+                      <div className={styles.teamActions}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTeamBIds((prev) =>
+                              Array.from(new Set([...prev, ...filteredTeamBOptions.map((p) => String(p.id))]))
+                            )
+                          }
+                        >
+                          Select Visible
+                        </button>
+                        <button type="button" onClick={() => setTeamBIds([])}>Clear</button>
+                      </div>
+                    </div>
+                    <input
+                      className={styles.teamSearch}
+                      placeholder="Search Team B players"
+                      value={teamBSearch}
+                      onChange={(e) => setTeamBSearch(e.target.value)}
+                    />
                     <select
                       multiple
                       value={teamBIds}
                       onChange={(e) => setTeamBIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
                     >
-                      {teamBOptions.map((p) => (
+                      {filteredTeamBOptions.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
+
+                    <div className={styles.selectedList}>
+                      {selectedTeamBPlayers.map((p) => (
+                        <button
+                          key={`b-${p.id}`}
+                          type="button"
+                          className={styles.selectedChip}
+                          onClick={() => setTeamBIds((prev) => prev.filter((id) => id !== String(p.id)))}
+                        >
+                          {p.name} x
+                        </button>
+                      ))}
+                      {selectedTeamBPlayers.length === 0 && <span className={styles.note}>No players selected</span>}
+                    </div>
                   </div>
                 </div>
 
@@ -579,6 +675,7 @@ export function MatchesPage() {
                 {scoreboard && (
                   <div className={styles.scoreboard}>
                     <h3>{selectedMatch?.match?.title}</h3>
+                    <p>Innings: {scoreboard.current_innings}</p>
                     <p className={styles.bigScore}>
                       {scoreboard.total_runs}/{scoreboard.wickets}
                     </p>
@@ -586,14 +683,40 @@ export function MatchesPage() {
                     <p>
                       Batting Team: {scoreboard.batting_team === 'A' ? selectedMatch?.match?.team_a_name : selectedMatch?.match?.team_b_name}
                     </p>
+                    <p>
+                      {selectedMatch?.match?.team_a_name}: {scoreboard.team_a_runs} | {selectedMatch?.match?.team_b_name}: {scoreboard.team_b_runs}
+                    </p>
 
-                    <h4>Recent Balls</h4>
+                    {scoreboard.result_text && (
+                      <p className={styles.resultBadge}>{scoreboard.result_text}</p>
+                    )}
+
+                    <h4>Current Over ({scoreboard.current_over_number})</h4>
                     <div className={styles.ballStrip}>
-                      {scoreboard.recent_balls.map((ball, idx) => (
-                        <span key={`${ball}-${idx}`}>{ball}</span>
+                      {scoreboard.current_over_balls.map((ball, idx) => (
+                        <span key={`current-${ball}-${idx}`}>{ball}</span>
                       ))}
-                      {scoreboard.recent_balls.length === 0 && <span>No balls recorded yet</span>}
+                      {scoreboard.current_over_balls.length === 0 && <span>No balls in current over yet</span>}
                     </div>
+
+                    <div className={styles.overToggleRow}>
+                      <button
+                        type="button"
+                        className={styles.toggleBtn}
+                        onClick={() => setShowPastOvers((prev) => !prev)}
+                        disabled={scoreboard.past_overs.length === 0}
+                      >
+                        {showPastOvers ? 'Hide Past Overs' : 'Show Past Overs'}
+                      </button>
+                    </div>
+
+                    {showPastOvers && scoreboard.past_overs.length > 0 && (
+                      <div className={styles.pastOversWrap}>
+                        {scoreboard.past_overs.map((overText, idx) => (
+                          <p key={`past-${idx}`} className={styles.overLine}>{overText}</p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </>

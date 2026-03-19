@@ -149,8 +149,59 @@
   gap: 10px;
 }
 
+.teamColumn {
+  background: #f7fbfa;
+  border: 1px solid #d7e8e4;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.teamHeaderRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.teamHeaderRow label {
+  font-weight: 700;
+  color: #234f49;
+}
+
+.teamActions {
+  display: flex;
+  gap: 6px;
+}
+
+.teamActions button {
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #2b5d57;
+}
+
+.teamSearch {
+  margin-bottom: 8px;
+}
+
 .teamSetup select {
   min-height: 170px;
+}
+
+.selectedList {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.selectedChip {
+  background: #dff1ec !important;
+  color: #154e45 !important;
+  border: 1px solid #b3dace !important;
+  border-radius: 999px !important;
+  padding: 5px 8px !important;
+  font-size: 12px !important;
 }
 
 .rowButtons {
@@ -223,6 +274,18 @@
   font-weight: 800;
 }
 
+.resultBadge {
+  margin-top: 8px;
+  display: inline-block;
+  background: #1d655d;
+  border: 1px solid #49a293;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #e9fffb;
+}
+
 .ballStrip {
   display: flex;
   flex-wrap: wrap;
@@ -234,6 +297,27 @@
   padding: 5px 8px;
   border-radius: 8px;
   font-size: 12px;
+}
+
+.overToggleRow {
+  margin-top: 10px;
+}
+
+.toggleBtn {
+  background: #2b5d57 !important;
+  color: #ffffff;
+}
+
+.pastOversWrap {
+  margin-top: 10px;
+  border-top: 1px dashed rgba(231, 255, 251, 0.4);
+  padding-top: 10px;
+}
+
+.overLine {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #cfeae6;
 }
 
 .error {

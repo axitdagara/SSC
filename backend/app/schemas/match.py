@@ -84,9 +84,18 @@ class BallEventResponse(BaseModel):
 class MatchScoreboardResponse(BaseModel):
     match_id: int
     innings: int
+    match_status: str
+    current_innings: int
     batting_team: str
     total_runs: int
     wickets: int
     legal_balls: int
     overs_display: str
     recent_balls: List[str]
+    current_over_number: int
+    current_over_balls: List[str]
+    past_overs: List[str]
+    team_a_runs: int
+    team_b_runs: int
+    winner_team: Optional[str] = None
+    result_text: Optional[str] = None
