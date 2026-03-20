@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ssc-db-data:/app/data
+    restart: unless-stopped
+    networks:
+      - ssc-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: /api
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - ssc-network
+
+volumes:
+  ssc-db-data:
+
+networks:
+  ssc-network:
+    driver: bridge

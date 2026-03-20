@@ -28,7 +28,14 @@ class Settings(BaseSettings):
     # API
     API_TITLE: str = "SSC API"
     API_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
+
+    # Deployment / CORS
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
     class Config:
         env_file = ".env"

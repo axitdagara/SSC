@@ -275,6 +275,23 @@ export function MatchesPage() {
   const selectedTeamAPlayers = players.filter((p) => teamAIds.includes(String(p.id)));
   const selectedTeamBPlayers = players.filter((p) => teamBIds.includes(String(p.id)));
   const reusableMatches = matches.filter((m) => m.id !== selectedMatchId);
+  const selectedMatchStatus = scoreboard?.match_status || selectedMatch?.match?.status || 'setup';
+  const isLiveMatch = selectedMatchStatus === 'live';
+  const isCompletedMatch = selectedMatchStatus === 'completed';
+  const teamAName = selectedMatch?.match?.team_a_name;
+  const teamBName = selectedMatch?.match?.team_b_name;
+  const isTeamAWinner = Boolean(scoreboard?.winner_team) && scoreboard.winner_team === teamAName;
+  const isTeamBWinner = Boolean(scoreboard?.winner_team) && scoreboard.winner_team === teamBName;
+
+  const getMatchStatusLabel = (status) => {
+    if (status === 'live') {
+      return 'LIVE';
+    }
+    if (status === 'completed') {
+      return 'COMPLETED';
+    }
+    return 'SETUP';
+  };
 
   return (
     <div className={styles.page}>
@@ -357,7 +374,20 @@ export function MatchesPage() {
                   className={`${styles.matchItem} ${selectedMatchId === match.id ? styles.active : ''}`}
                   onClick={() => handleSelectMatch(match)}
                 >
-                  <strong>{match.title}</strong>
+                  <div className={styles.matchHeadRow}>
+                    <strong>{match.title}</strong>
+                    <span
+                      className={`${styles.statusPill} ${
+                        match.status === 'live'
+                          ? styles.statusLive
+                          : match.status === 'completed'
+                          ? styles.statusCompleted
+                          : styles.statusSetup
+                      }`}
+                    >
+                      {getMatchStatusLabel(match.status)}
+                    </span>
+                  </div>
                   <span>{match.team_a_name} vs {match.team_b_name}</span>
                   <small>{match.status}</small>
                 </button>
@@ -666,56 +696,116 @@ export function MatchesPage() {
 
                   <div className={styles.rowButtons}>
                     <button type="button" onClick={() => setCurrentStep(2)}>Back</button>
-                    <button type="submit">Record Ball</button>
+                    <button type="submit" disabled={isCompletedMatch}>Record Ball</button>
                   </div>
                 </form>
+
+                {isCompletedMatch && (
+                  <p className={styles.completedHint}>
+                    This match is completed. Live scoring inputs are now read-only.
+                  </p>
+                )}
 
                 <h3 className={styles.sectionTitle}>Live Scoreboard</h3>
                 {!scoreboard && <p>Select a match to view live score.</p>}
                 {scoreboard && (
-                  <div className={styles.scoreboard}>
-                    <h3>{selectedMatch?.match?.title}</h3>
-                    <p>Innings: {scoreboard.current_innings}</p>
-                    <p className={styles.bigScore}>
-                      {scoreboard.total_runs}/{scoreboard.wickets}
-                    </p>
-                    <p>Overs: {scoreboard.overs_display}</p>
-                    <p>
-                      Batting Team: {scoreboard.batting_team === 'A' ? selectedMatch?.match?.team_a_name : selectedMatch?.match?.team_b_name}
-                    </p>
-                    <p>
-                      {selectedMatch?.match?.team_a_name}: {scoreboard.team_a_runs} | {selectedMatch?.match?.team_b_name}: {scoreboard.team_b_runs}
-                    </p>
+                  <div
+                    className={`${styles.scoreboard} ${
+                      isCompletedMatch
+                        ? styles.scoreboardCompleted
+                        : isLiveMatch
+                        ? styles.scoreboardLive
+                        : styles.scoreboardSetup
+                    }`}
+                  >
+                    <div className={styles.scoreboardTop}>
+                      <h3>{selectedMatch?.match?.title}</h3>
+                      <span
+                        className={`${styles.scoreboardStatus} ${
+                          isCompletedMatch
+                            ? styles.scoreboardStatusCompleted
+                            : isLiveMatch
+                            ? styles.scoreboardStatusLive
+                            : styles.scoreboardStatusSetup
+                        }`}
+                      >
+                        {getMatchStatusLabel(selectedMatchStatus)}
+                      </span>
+                    </div>
+
+                    <div className={styles.teamTotalsRow}>
+                      <div className={`${styles.teamTotalItem} ${isTeamAWinner ? styles.teamTotalWinner : ''}`}>
+                        <span>
+                          {teamAName}
+                          {isTeamAWinner && <em className={styles.winnerTag}>Winner</em>}
+                        </span>
+                        <strong>{scoreboard.team_a_runs}</strong>
+                      </div>
+                      <div className={`${styles.teamTotalItem} ${isTeamBWinner ? styles.teamTotalWinner : ''}`}>
+                        <span>
+                          {teamBName}
+                          {isTeamBWinner && <em className={styles.winnerTag}>Winner</em>}
+                        </span>
+                        <strong>{scoreboard.team_b_runs}</strong>
+                      </div>
+                    </div>
+
+                    <div className={styles.scoreMainRow}>
+                      <div className={styles.scoreMetaItem}>
+                        <span className={styles.scoreMetaLabel}>Innings</span>
+                        <strong className={styles.scoreMetaValue}>{scoreboard.current_innings}</strong>
+                      </div>
+                      <div className={styles.scoreMetaItem}>
+                        <span className={styles.scoreMetaLabel}>Overs</span>
+                        <strong className={styles.scoreMetaValue}>{scoreboard.overs_display}</strong>
+                      </div>
+                      <div className={styles.scoreMetaItemWide}>
+                        <span className={styles.scoreMetaLabel}>Batting Team</span>
+                        <strong className={styles.scoreMetaValue}>
+                          {scoreboard.batting_team === 'A' ? selectedMatch?.match?.team_a_name : selectedMatch?.match?.team_b_name}
+                        </strong>
+                      </div>
+                      <div className={styles.scoreNowCard}>
+                        <span className={styles.scoreMetaLabel}>Current Score</span>
+                        <p className={styles.bigScore}>
+                          {scoreboard.total_runs}/{scoreboard.wickets}
+                        </p>
+                      </div>
+                    </div>
 
                     {scoreboard.result_text && (
                       <p className={styles.resultBadge}>{scoreboard.result_text}</p>
                     )}
 
-                    <h4>Current Over ({scoreboard.current_over_number})</h4>
-                    <div className={styles.ballStrip}>
-                      {scoreboard.current_over_balls.map((ball, idx) => (
-                        <span key={`current-${ball}-${idx}`}>{ball}</span>
-                      ))}
-                      {scoreboard.current_over_balls.length === 0 && <span>No balls in current over yet</span>}
-                    </div>
+                    {!isCompletedMatch && (
+                      <>
+                        <h4>Current Over ({scoreboard.current_over_number})</h4>
+                        <div className={styles.ballStrip}>
+                          {scoreboard.current_over_balls.map((ball, idx) => (
+                            <span key={`current-${ball}-${idx}`}>{ball}</span>
+                          ))}
+                          {scoreboard.current_over_balls.length === 0 && <span>No balls in current over yet</span>}
+                        </div>
 
-                    <div className={styles.overToggleRow}>
-                      <button
-                        type="button"
-                        className={styles.toggleBtn}
-                        onClick={() => setShowPastOvers((prev) => !prev)}
-                        disabled={scoreboard.past_overs.length === 0}
-                      >
-                        {showPastOvers ? 'Hide Past Overs' : 'Show Past Overs'}
-                      </button>
-                    </div>
+                        <div className={styles.overToggleRow}>
+                          <button
+                            type="button"
+                            className={styles.toggleBtn}
+                            onClick={() => setShowPastOvers((prev) => !prev)}
+                            disabled={scoreboard.past_overs.length === 0}
+                          >
+                            {showPastOvers ? 'Hide Past Overs' : 'Show Past Overs'}
+                          </button>
+                        </div>
 
-                    {showPastOvers && scoreboard.past_overs.length > 0 && (
-                      <div className={styles.pastOversWrap}>
-                        {scoreboard.past_overs.map((overText, idx) => (
-                          <p key={`past-${idx}`} className={styles.overLine}>{overText}</p>
-                        ))}
-                      </div>
+                        {showPastOvers && scoreboard.past_overs.length > 0 && (
+                          <div className={styles.pastOversWrap}>
+                            {scoreboard.past_overs.map((overText, idx) => (
+                              <p key={`past-${idx}`} className={styles.overLine}>{overText}</p>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

@@ -1,3 +1,14 @@
+---
+title: SSC
+emoji: 📉
+colorFrom: purple
+colorTo: yellow
+sdk: docker
+pinned: false
+license: mit
+short_description: SculptSoft Cricketers
+---
+
 # SSC - Sculpt Soft Cricketers
 
 A complete web-based player management and performance tracking system for cricket players. Built with FastAPI backend and React frontend, featuring a freemium subscription model.
@@ -215,25 +226,63 @@ Premium membership auto-downgrades after 30 days.
 - Deactivate users
 - View system statistics
 
-## 🐳 Docker Setup (Optional)
+## 🐳 Docker Setup
+
+### Development (hot reload)
 
 ```bash
-docker-compose up -d
+docker-compose up -d --build
 ```
 
-This will start both backend and frontend containers.
+This starts backend on `http://localhost:8000` and frontend on `http://localhost:3000`.
+
+### Production-ready (Nginx + Gunicorn)
+
+1. Copy backend env template:
+```bash
+cp backend/.env.example backend/.env
+```
+
+2. Update secrets in `backend/.env`:
+- `SECRET_KEY`
+- `ADMIN_PASSWORD`
+- `CORS_ORIGINS` (set your real frontend domain)
+
+3. Build and run production stack:
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+4. Open app at `http://localhost`.
+
+Production stack includes:
+- Frontend served by Nginx on port 80
+- Reverse proxy `/api` -> backend service
+- Backend served by Gunicorn + Uvicorn workers
+- Persistent SQLite volume `ssc-db-data`
 
 ## 📖 Environment Variables
 
 ### Backend (.env)
+
+Use `backend/.env.example` as base.
+
+Important variables:
 ```
-DATABASE_URL=sqlite:///./ssc.db
-SECRET_KEY=your-secret-key
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-PREMIUM_COST=1000
-PREMIUM_DURATION_DAYS=30
+DATABASE_URL=sqlite:////app/data/ssc.db
+SECRET_KEY=CHANGE_THIS
+DEBUG=False
+CORS_ORIGINS=https://your-frontend-domain.com
 ```
+
+### Frontend (.env)
+
+For development:
+```
+VITE_API_URL=http://localhost:8000
+```
+
+For production Docker build, frontend uses `/api` via Nginx proxy.
 
 ## 🧪 Testing
 
@@ -252,18 +301,62 @@ curl -X GET "http://localhost:8000/players/me" \
 
 ## 🚀 Deployment
 
-### Backend
-The backend can be deployed on:
+### Option 1: Hugging Face Spaces (Easiest - Both Backend + Frontend)
+
+1. **Create Hugging Face account** and new Space (Docker)
+
+2. **Copy/create required files in Space repo:**
+   ```bash
+   Dockerfile.huggingface
+   docker-entrypoint.sh
+   nginx-huggingface.conf
+   backend/
+   frontend/
+   ```
+
+3. **Rename or use Dockerfile as:**
+   ```bash
+   cp Dockerfile.huggingface Dockerfile
+   chmod +x docker-entrypoint.sh
+   ```
+
+4. **Set secrets in Space settings:**
+   - `SECRET_KEY`: Generate strong random string
+   - `ADMIN_PASSWORD`: Your secure admin password
+
+5. **Push to Hugging Face repo** - Space auto-builds and deploys
+
+6. **Access your app:**
+   ```
+   https://huggingface.co/spaces/{your-username}/{your-space-name}
+   ```
+
+Your app runs on port 7860 with:
+- Frontend: Served by Nginx
+- Backend: Internal port 8000
+- API proxy: `/api` → backend
+- Docs still available at `/docs`
+
+### Option 2: Docker Compose (Local or VPS)
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+Access at `http://localhost`
+
+### Option 3: Separate Deployment
+
+**Backend:**
 - Heroku
 - AWS EC2
 - Google Cloud Run
 - DigitalOcean
+- Railway.app
 
-### Frontend
-The frontend can be deployed on:
-- Vercel
+**Frontend:**
+- Vercel (recommended)
 - Netlify
-- AWS S3
+- AWS S3 + CloudFront
 - GitHub Pages
 
 ## 🔒 Security Features
