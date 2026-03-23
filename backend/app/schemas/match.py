@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import BaseModel
 
@@ -14,7 +14,7 @@ class MatchCreate(BaseModel):
 class MatchResponse(BaseModel):
     id: int
     title: str
-    created_by_id: int
+    created_by_id: Union[int, str]
     team_a_name: str
     team_b_name: str
     overs_per_innings: int
@@ -28,12 +28,12 @@ class MatchResponse(BaseModel):
 
 
 class MatchTeamSetupRequest(BaseModel):
-    team_a_player_ids: List[int]
-    team_b_player_ids: List[int]
+    team_a_player_ids: List[Union[int, str]]
+    team_b_player_ids: List[Union[int, str]]
 
 
 class MatchPlayerView(BaseModel):
-    user_id: int
+    user_id: Union[int, str]
     name: str
     team: str
 
@@ -53,8 +53,8 @@ class BallEventCreate(BaseModel):
     over_number: int
     ball_number: int
     batting_team: str  # A or B
-    striker_id: Optional[int] = None
-    bowler_id: Optional[int] = None
+    striker_id: Optional[Union[int, str]] = None
+    bowler_id: Optional[Union[int, str]] = None
     runs_off_bat: int = 0
     extras: int = 0
     extra_type: Optional[str] = None
@@ -99,3 +99,4 @@ class MatchScoreboardResponse(BaseModel):
     team_b_runs: int
     winner_team: Optional[str] = None
     result_text: Optional[str] = None
+    all_balls: List[BallEventResponse] = []

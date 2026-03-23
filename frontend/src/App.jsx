@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
+import { PWAInstallGuide } from './components/PWAInstallGuide';
 import { HomePage } from './pages/Home';
 import { LoginPage, RegisterPage } from './pages/Auth';
 import { DashboardPage } from './pages/Dashboard';
@@ -54,37 +55,40 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
-      <Navbar isAuthenticated={isAuthenticated} user={user} />
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/" element={<HomePage />} />
-        <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" /> : <LoginPage />} />
-        <Route path="/register" element={isAuthenticated ? <Navigate to="/dashboard" /> : <RegisterPage />} />
+    <>
+      <BrowserRouter>
+        <Navbar isAuthenticated={isAuthenticated} user={user} />
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<HomePage />} />
+          <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" /> : <LoginPage />} />
+          <Route path="/register" element={isAuthenticated ? <Navigate to="/dashboard" /> : <RegisterPage />} />
 
-        {/* Protected Routes */}
-        {isAuthenticated ? (
-          <>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/players" element={<PlayersPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/player/:playerId" element={<ProfilePage />} />
-            <Route path="/finance" element={<FinancePage />} />
-            <Route path="/matches" element={<MatchesPage />} />
-            <Route path="/admin" element={isAdmin ? <AdminPage /> : <Navigate to="/dashboard" />} />
-          </>
-        ) : (
-          <>
-            <Route path="/dashboard" element={<Navigate to="/login" />} />
-            <Route path="/players" element={<Navigate to="/login" />} />
-            <Route path="/profile" element={<Navigate to="/login" />} />
-            <Route path="/finance" element={<Navigate to="/login" />} />
-            <Route path="/matches" element={<Navigate to="/login" />} />
-            <Route path="/admin" element={<Navigate to="/login" />} />
-          </>
-        )}
-      </Routes>
-    </BrowserRouter>
+          {/* Protected Routes */}
+          {isAuthenticated ? (
+            <>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/players" element={<PlayersPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/player/:playerId" element={<ProfilePage />} />
+              <Route path="/finance" element={<FinancePage />} />
+              <Route path="/matches" element={<MatchesPage />} />
+              <Route path="/admin" element={isAdmin ? <AdminPage /> : <Navigate to="/dashboard" />} />
+            </>
+          ) : (
+            <>
+              <Route path="/dashboard" element={<Navigate to="/login" />} />
+              <Route path="/players" element={<Navigate to="/login" />} />
+              <Route path="/profile" element={<Navigate to="/login" />} />
+              <Route path="/finance" element={<Navigate to="/login" />} />
+              <Route path="/matches" element={<Navigate to="/login" />} />
+              <Route path="/admin" element={<Navigate to="/login" />} />
+            </>
+          )}
+        </Routes>
+      </BrowserRouter>
+      <PWAInstallGuide />
+    </>
   );
 }
 

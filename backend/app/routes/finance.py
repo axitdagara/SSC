@@ -1,70 +1,52 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+
 from app.config import settings
-from app.database import get_db
-from app.models import User, Payment, FinanceTransaction
 from app.middleware.auth import get_current_user
 from app.schemas import GuestFundRequest, ManualCreditRequest, FinanceTransactionResponse
+from app.utils.firestore_data import COLL, as_obj, create_doc, list_docs, now_utc
 from app.utils.logger import log_action
 
 router = APIRouter(prefix="/finance", tags=["Finance"])
 
 
-def require_admin(user: User) -> None:
+def require_admin(user) -> None:
     if user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can perform this action",
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can perform this action")
 
 
-def calculate_remaining_funds(db: Session) -> float:
-    total_payments = db.query(func.coalesce(func.sum(Payment.amount), 0.0)).filter(
-        Payment.status == "completed"
-    ).scalar() or 0.0
+def calculate_remaining_funds() -> float:
+    payments = list_docs(COLL.payments, predicate=lambda row: row.get("status") == "completed")
+    transactions = list_docs(COLL.finance_transactions)
 
-    total_manual_credits = db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0)).filter(
-        FinanceTransaction.transaction_type == "credit",
-        FinanceTransaction.category == "manual_credit",
-    ).scalar() or 0.0
-
-    total_debits = db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0)).filter(
-        FinanceTransaction.transaction_type == "debit",
-    ).scalar() or 0.0
+    total_payments = sum(float(row.get("amount", 0)) for row in payments)
+    total_manual_credits = sum(
+        float(row.get("amount", 0))
+        for row in transactions
+        if row.get("transaction_type") == "credit" and row.get("category") == "manual_credit"
+    )
+    total_debits = sum(float(row.get("amount", 0)) for row in transactions if row.get("transaction_type") == "debit")
 
     return round((total_payments + total_manual_credits) - total_debits, 2)
 
 
 @router.get("/overview")
-async def get_finance_overview(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get total collected funds, pending funds, and remaining funds."""
-    active_players = db.query(User).filter(User.is_active == True, User.role == "player").all()
+async def get_finance_overview(current_user=Depends(get_current_user)):
+    active_players = list_docs(COLL.users, predicate=lambda row: row.get("is_active", True) and row.get("role") == "player")
+    payments = list_docs(COLL.payments, predicate=lambda row: row.get("status") == "completed")
+    transactions = list_docs(COLL.finance_transactions)
 
-    paid_user_ids = {
-        row[0]
-        for row in db.query(Payment.user_id)
-        .filter(Payment.status == "completed")
-        .distinct()
-        .all()
-    }
+    paid_user_ids = {row.get("user_id") for row in payments}
+    unpaid_players = [player for player in active_players if player.get("id") not in paid_user_ids]
 
-    unpaid_players = [player for player in active_players if player.id not in paid_user_ids]
-
-    total_collected = db.query(func.coalesce(func.sum(Payment.amount), 0.0)).filter(
-        Payment.status == "completed"
-    ).scalar() or 0.0
-
-    total_guest_fund_used = db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0)).filter(
-        FinanceTransaction.transaction_type == "debit",
-        FinanceTransaction.category == "guest_fund",
-    ).scalar() or 0.0
+    total_collected = sum(float(row.get("amount", 0)) for row in payments)
+    total_guest_fund_used = sum(
+        float(row.get("amount", 0))
+        for row in transactions
+        if row.get("transaction_type") == "debit" and row.get("category") == "guest_fund"
+    )
 
     pending_funds = len(unpaid_players) * settings.PREMIUM_COST
-    funds_remaining = calculate_remaining_funds(db)
+    funds_remaining = calculate_remaining_funds()
 
     return {
         "total_collected": round(total_collected, 2),
@@ -78,29 +60,24 @@ async def get_finance_overview(
 
 
 @router.get("/player-payments")
-async def get_player_payments(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Show who paid premium and current payment status per player."""
-    players = db.query(User).filter(User.is_active == True, User.role == "player").all()
+async def get_player_payments(current_user=Depends(get_current_user)):
+    players = list_docs(COLL.users, predicate=lambda row: row.get("is_active", True) and row.get("role") == "player")
+    all_payments = list_docs(COLL.payments, predicate=lambda row: row.get("status") == "completed")
 
     result = []
     for player in players:
-        payments = db.query(Payment).filter(
-            Payment.user_id == player.id,
-            Payment.status == "completed",
-        ).order_by(Payment.created_at.desc()).all()
+        payments = [row for row in all_payments if row.get("user_id") == player.get("id")]
+        payments.sort(key=lambda row: row.get("created_at") or now_utc(), reverse=True)
 
-        amount_paid = round(sum(payment.amount for payment in payments), 2)
-        last_payment_date = payments[0].created_at if payments else None
+        amount_paid = round(sum(float(payment.get("amount", 0)) for payment in payments), 2)
+        last_payment_date = payments[0].get("created_at") if payments else None
 
         result.append(
             {
-                "user_id": player.id,
-                "name": player.name,
-                "email": player.email,
-                "is_premium": player.is_premium,
+                "user_id": player.get("id"),
+                "name": player.get("name"),
+                "email": player.get("email"),
+                "is_premium": player.get("is_premium", False),
                 "amount_paid": amount_paid,
                 "has_paid": amount_paid >= settings.PREMIUM_COST,
                 "last_payment_date": last_payment_date,
@@ -108,27 +85,18 @@ async def get_player_payments(
             }
         )
 
-    result.sort(key=lambda row: (not row["has_paid"], row["name"].lower()))
+    result.sort(key=lambda row: (not row["has_paid"], (row["name"] or "").lower()))
     return result
 
 
 @router.get("/transactions", response_model=list[FinanceTransactionResponse])
-async def get_finance_transactions(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """List recent finance transactions."""
-    transactions = db.query(FinanceTransaction).order_by(FinanceTransaction.created_at.desc()).limit(100).all()
-    return transactions
+async def get_finance_transactions(current_user=Depends(get_current_user)):
+    transactions = list_docs(COLL.finance_transactions, sort_key="created_at", reverse=True, limit=100)
+    return [as_obj(row) for row in transactions]
 
 
 @router.post("/guest-fund")
-async def record_guest_fund_expense(
-    payload: GuestFundRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Record guest fund expense after a match and update remaining funds."""
+async def record_guest_fund_expense(payload: GuestFundRequest, current_user=Depends(get_current_user)):
     require_admin(current_user)
 
     if payload.guest_fund <= 0:
@@ -138,19 +106,20 @@ async def record_guest_fund_expense(
     if payload.notes:
         description = f"{description} | {payload.notes}"
 
-    transaction = FinanceTransaction(
-        user_id=None,
-        transaction_type="debit",
-        amount=payload.guest_fund,
-        category="guest_fund",
-        description=description,
-        reference_id=None,
+    create_doc(
+        COLL.finance_transactions,
+        {
+            "user_id": None,
+            "transaction_type": "debit",
+            "amount": payload.guest_fund,
+            "category": "guest_fund",
+            "description": description,
+            "reference_id": None,
+            "created_at": now_utc(),
+        },
     )
 
-    db.add(transaction)
-    db.commit()
-
-    funds_remaining = calculate_remaining_funds(db)
+    funds_remaining = calculate_remaining_funds()
     log_action("Guest fund expense recorded", user_id=current_user.id, details=description)
 
     return {
@@ -161,30 +130,26 @@ async def record_guest_fund_expense(
 
 
 @router.post("/manual-credit")
-async def record_manual_credit(
-    payload: ManualCreditRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Add manual credit to club funds."""
+async def record_manual_credit(payload: ManualCreditRequest, current_user=Depends(get_current_user)):
     require_admin(current_user)
 
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Credit amount should be greater than zero")
 
-    transaction = FinanceTransaction(
-        user_id=payload.user_id,
-        transaction_type="credit",
-        amount=payload.amount,
-        category="manual_credit",
-        description=payload.notes or "Manual fund credit",
-        reference_id=None,
+    create_doc(
+        COLL.finance_transactions,
+        {
+            "user_id": payload.user_id,
+            "transaction_type": "credit",
+            "amount": payload.amount,
+            "category": "manual_credit",
+            "description": payload.notes or "Manual fund credit",
+            "reference_id": None,
+            "created_at": now_utc(),
+        },
     )
 
-    db.add(transaction)
-    db.commit()
-
-    funds_remaining = calculate_remaining_funds(db)
+    funds_remaining = calculate_remaining_funds()
     log_action("Manual fund credit recorded", user_id=current_user.id, details=str(payload.amount))
 
     return {

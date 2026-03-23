@@ -24,9 +24,6 @@ def env_first_bool(keys: list[str], default: bool) -> bool:
 
 
 class Settings(BaseSettings):
-    # Database
-    DATABASE_URL: str = env_first(["DATABASE_URL", "DATABASEURL"], "sqlite:///./ssc.db")
-    
     # Security
     SECRET_KEY: str = env_first(["SECRET_KEY", "SECRETKEY"], "dev-secret-key-change-in-production")
     ALGORITHM: str = env_first(["ALGORITHM"], "HS256")
@@ -61,6 +58,22 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = env_first(
         ["CORS_ORIGINS", "CORSORIGINS"],
         "http://localhost:3000,http://127.0.0.1:3000",
+    )
+
+    # Firebase Auth integration
+    FIREBASE_AUTH_ENABLED: bool = env_first_bool(
+        ["FIREBASE_AUTH_ENABLED", "FIREBASEAUTHENABLED"],
+        False,
+    )
+    FIREBASE_PROJECT_ID: str = env_first(["FIREBASE_PROJECT_ID", "FIREBASEPROJECTID"], "")
+    FIREBASE_WEB_API_KEY: str = env_first(["FIREBASE_WEB_API_KEY", "FIREBASEWEBAPIKEY"], "")
+    FIREBASE_SERVICE_ACCOUNT_PATH: str = env_first(
+        ["FIREBASE_SERVICE_ACCOUNT_PATH", "FIREBASESERVICEACCOUNTPATH"],
+        "",
+    )
+    FIREBASE_SERVICE_ACCOUNT_JSON: str = env_first(
+        ["FIREBASE_SERVICE_ACCOUNT_JSON", "FIREBASESERVICEACCOUNTJSON"],
+        "",
     )
 
     @property

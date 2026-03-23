@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 
 class GuestFundRequest(BaseModel):
@@ -11,13 +11,13 @@ class GuestFundRequest(BaseModel):
 
 class ManualCreditRequest(BaseModel):
     amount: float
-    user_id: Optional[int] = None
+    user_id: Optional[Union[int, str]] = None
     notes: Optional[str] = None
 
 
 class FinanceTransactionResponse(BaseModel):
     id: int
-    user_id: Optional[int]
+    user_id: Optional[Union[int, str]]
     transaction_type: str
     amount: float
     category: str

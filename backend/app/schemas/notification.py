@@ -1,10 +1,11 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Union
 
 
 class NotificationResponse(BaseModel):
     id: int
-    user_id: int
+    user_id: Union[int, str]
     title: str
     message: str
     notification_type: str

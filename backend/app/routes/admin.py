@@ -1,144 +1,104 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func
-from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List
+
 from app.config import settings
-from app.database import get_db
-from app.models import User, Payment, FinanceTransaction, AdminChatMessage
 from app.schemas import AdminChatCreate, AdminChatResponse
 from app.middleware.auth import get_admin_user, get_current_user
-from app.utils.logger import log_action, log_error
+from app.utils.firestore_data import COLL, as_obj, create_doc, first_doc, list_docs, now_utc, update_doc
+from app.utils.logger import log_action
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
 @router.get("/users", response_model=List)
-async def list_all_users(
-    skip: int = 0,
-    limit: int = 100,
-    admin: User = Depends(get_admin_user),
-    db: Session = Depends(get_db)
-):
-    """Get all users (admin only)"""
-
-    users = db.query(User).offset(skip).limit(limit).all()
+async def list_all_users(skip: int = 0, limit: int = 100, admin=Depends(get_admin_user)):
+    users = list_docs(COLL.users, sort_key="created_at", reverse=True, offset=skip, limit=limit)
     log_action("Admin viewed all users", user_id=admin.id)
     return [
         {
-            "id": user.id,
-            "name": user.name,
-            "email": user.email,
-            "role": user.role,
-            "is_active": user.is_active,
-            "is_premium": user.is_premium,
-            "runs": user.runs,
-            "matches": user.matches,
-            "wickets": user.wickets,
-            "created_at": user.created_at,
+            "id": user.get("id"),
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "role": user.get("role"),
+            "is_active": user.get("is_active", True),
+            "is_premium": user.get("is_premium", False),
+            "runs": user.get("runs", 0),
+            "matches": user.get("matches", 0),
+            "wickets": user.get("wickets", 0),
+            "created_at": user.get("created_at"),
         }
         for user in users
     ]
 
 
 @router.put("/users/{user_id}/premium")
-async def toggle_user_premium(
-    user_id: int,
-    days: int = 30,
-    admin: User = Depends(get_admin_user),
-    db: Session = Depends(get_db)
-):
-    """Toggle user premium status (admin only)"""
-
-    user = db.query(User).filter(User.id == user_id).first()
+async def toggle_user_premium(user_id: int, days: int = 30, admin=Depends(get_admin_user)):
+    user = first_doc(COLL.users, predicate=lambda row: row.get("id") == user_id)
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    user.is_premium = not user.is_premium
+    is_premium = not user.get("is_premium", False)
+    patch = {"is_premium": is_premium, "updated_at": now_utc()}
 
-    if user.is_premium:
-        from datetime import datetime, timedelta
-        user.premium_expiry = datetime.utcnow() + timedelta(days=days)
-        user.premium_start_date = datetime.utcnow()
+    if is_premium:
+        from datetime import timedelta
+        patch["premium_expiry"] = now_utc() + timedelta(days=days)
+        patch["premium_start_date"] = now_utc()
     else:
-        user.premium_expiry = None
+        patch["premium_expiry"] = None
 
-    db.commit()
-    log_action("Admin toggled user premium", user_id=admin.id,
-               details=f"User {user_id}")
+    update_doc(COLL.users, user_id, patch)
+    log_action("Admin toggled user premium", user_id=admin.id, details=f"User {user_id}")
 
-    return {"message": f"User premium status updated"}
+    return {"message": "User premium status updated"}
 
 
 @router.delete("/users/{user_id}")
-async def deactivate_user(
-    user_id: int,
-    admin: User = Depends(get_admin_user),
-    db: Session = Depends(get_db)
-):
-    """Deactivate user (admin only)"""
-
-    user = db.query(User).filter(User.id == user_id).first()
+async def deactivate_user(user_id: int, admin=Depends(get_admin_user)):
+    user = first_doc(COLL.users, predicate=lambda row: row.get("id") == user_id)
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    user.is_active = False
-    db.commit()
+    update_doc(COLL.users, user_id, {"is_active": False, "updated_at": now_utc()})
 
-    log_action("Admin deactivated user", user_id=admin.id,
-               details=f"User {user_id}")
+    log_action("Admin deactivated user", user_id=admin.id, details=f"User {user_id}")
 
     return {"message": "User deactivated successfully"}
 
 
 @router.get("/stats")
-async def get_system_stats(
-    admin: User = Depends(get_admin_user),
-    db: Session = Depends(get_db)
-):
-    """Get system statistics (admin only)"""
+async def get_system_stats(admin=Depends(get_admin_user)):
+    users = list_docs(COLL.users)
+    payments = list_docs(COLL.payments, predicate=lambda row: row.get("status") == "completed")
+    transactions = list_docs(COLL.finance_transactions)
+    chats = list_docs(COLL.admin_chat_messages)
 
-    total_users = db.query(User).count()
-    active_users = db.query(User).filter(User.is_active == True).count()
-    premium_users = db.query(User).filter(User.is_premium == True).count()
-    total_matches = sum([u.matches for u in db.query(User).all()])
+    total_users = len(users)
+    active_users = len([u for u in users if u.get("is_active", True)])
+    premium_users = len([u for u in users if u.get("is_premium", False)])
+    total_matches = sum(int(u.get("matches", 0)) for u in users)
 
-    paid_user_ids = {
-        row[0]
-        for row in db.query(Payment.user_id)
-        .filter(Payment.status == "completed")
-        .distinct()
-        .all()
-    }
-    active_players = db.query(User).filter(User.is_active == True, User.role == "player").all()
-    unpaid_players = [player for player in active_players if player.id not in paid_user_ids]
+    paid_user_ids = {row.get("user_id") for row in payments}
+    active_players = [u for u in users if u.get("is_active", True) and u.get("role") == "player"]
+    unpaid_players = [u for u in active_players if u.get("id") not in paid_user_ids]
 
     pending_funds = len(unpaid_players) * settings.PREMIUM_COST
 
-    total_collected = db.query(func.coalesce(func.sum(Payment.amount), 0.0)).filter(
-        Payment.status == "completed"
-    ).scalar() or 0.0
-    manual_credits = db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0)).filter(
-        FinanceTransaction.transaction_type == "credit",
-        FinanceTransaction.category == "manual_credit",
-    ).scalar() or 0.0
-    total_debits = db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0)).filter(
-        FinanceTransaction.transaction_type == "debit",
-    ).scalar() or 0.0
+    total_collected = sum(float(row.get("amount", 0)) for row in payments)
+    manual_credits = sum(
+        float(row.get("amount", 0))
+        for row in transactions
+        if row.get("transaction_type") == "credit" and row.get("category") == "manual_credit"
+    )
+    total_debits = sum(float(row.get("amount", 0)) for row in transactions if row.get("transaction_type") == "debit")
     funds_remaining = round((total_collected + manual_credits) - total_debits, 2)
 
-    unread_chat_messages = db.query(AdminChatMessage).filter(
-        AdminChatMessage.sender_role == "player",
-        AdminChatMessage.is_read == False,
-    ).count()
+    unread_chat_messages = len(
+        [m for m in chats if m.get("sender_role") == "player" and not m.get("is_read", False)]
+    )
 
     log_action("Admin viewed system stats", user_id=admin.id)
 
@@ -154,34 +114,26 @@ async def get_system_stats(
 
 
 @router.get("/chats")
-async def get_chat_threads(
-    admin: User = Depends(get_admin_user),
-    db: Session = Depends(get_db),
-):
-    """Get admin chat thread summary by player."""
-    players = db.query(User).filter(User.role == "player", User.is_active == True).all()
+async def get_chat_threads(admin=Depends(get_admin_user)):
+    players = list_docs(COLL.users, predicate=lambda row: row.get("role") == "player" and row.get("is_active", True))
+    chats = list_docs(COLL.admin_chat_messages, sort_key="created_at", reverse=True)
 
     threads = []
     for player in players:
-        messages = db.query(AdminChatMessage).filter(
-            AdminChatMessage.user_id == player.id
-        ).order_by(AdminChatMessage.created_at.desc()).limit(1).all()
-
-        last_message = messages[0] if messages else None
-        unread_count = db.query(AdminChatMessage).filter(
-            AdminChatMessage.user_id == player.id,
-            AdminChatMessage.sender_role == "player",
-            AdminChatMessage.is_read == False,
-        ).count()
+        player_messages = [m for m in chats if m.get("user_id") == player.get("id")]
+        last_message = player_messages[0] if player_messages else None
+        unread_count = len(
+            [m for m in player_messages if m.get("sender_role") == "player" and not m.get("is_read", False)]
+        )
 
         threads.append(
             {
-                "user_id": player.id,
-                "name": player.name,
-                "email": player.email,
+                "user_id": player.get("id"),
+                "name": player.get("name"),
+                "email": player.get("email"),
                 "unread_count": unread_count,
-                "last_message": last_message.message if last_message else None,
-                "last_message_at": last_message.created_at if last_message else None,
+                "last_message": last_message.get("message") if last_message else None,
+                "last_message_at": last_message.get("created_at") if last_message else None,
             }
         )
 
@@ -190,39 +142,29 @@ async def get_chat_threads(
 
 
 @router.get("/chats/{user_id}", response_model=list[AdminChatResponse])
-async def get_chat_thread(
-    user_id: int,
-    admin: User = Depends(get_admin_user),
-    db: Session = Depends(get_db),
-):
-    """Get full chat thread for a player."""
-    user = db.query(User).filter(User.id == user_id, User.role == "player").first()
+async def get_chat_thread(user_id: int, admin=Depends(get_admin_user)):
+    user = first_doc(COLL.users, predicate=lambda row: row.get("id") == user_id and row.get("role") == "player")
     if not user:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    messages = db.query(AdminChatMessage).filter(
-        AdminChatMessage.user_id == user_id
-    ).order_by(AdminChatMessage.created_at.asc()).all()
+    messages = list_docs(
+        COLL.admin_chat_messages,
+        predicate=lambda row: row.get("user_id") == user_id,
+        sort_key="created_at",
+        reverse=False,
+    )
 
-    db.query(AdminChatMessage).filter(
-        AdminChatMessage.user_id == user_id,
-        AdminChatMessage.sender_role == "player",
-        AdminChatMessage.is_read == False,
-    ).update({"is_read": True})
-    db.commit()
+    for message in messages:
+        if message.get("sender_role") == "player" and not message.get("is_read", False):
+            update_doc(COLL.admin_chat_messages, message["id"], {"is_read": True})
+            message["is_read"] = True
 
-    return messages
+    return [as_obj(row) for row in messages]
 
 
 @router.post("/chats/{user_id}", response_model=AdminChatResponse)
-async def send_admin_chat_message(
-    user_id: int,
-    payload: AdminChatCreate,
-    admin: User = Depends(get_admin_user),
-    db: Session = Depends(get_db),
-):
-    """Send a message from admin to a player."""
-    user = db.query(User).filter(User.id == user_id, User.role == "player").first()
+async def send_admin_chat_message(user_id: int, payload: AdminChatCreate, admin=Depends(get_admin_user)):
+    user = first_doc(COLL.users, predicate=lambda row: row.get("id") == user_id and row.get("role") == "player")
     if not user:
         raise HTTPException(status_code=404, detail="Player not found")
 
@@ -230,60 +172,54 @@ async def send_admin_chat_message(
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    chat = AdminChatMessage(
-        user_id=user_id,
-        sender_role="admin",
-        message=message,
-        is_read=False,
+    chat = create_doc(
+        COLL.admin_chat_messages,
+        {
+            "user_id": user_id,
+            "sender_role": "admin",
+            "message": message,
+            "is_read": False,
+            "created_at": now_utc(),
+        },
     )
-    db.add(chat)
-    db.commit()
-    db.refresh(chat)
 
     log_action("Admin chat message sent", user_id=admin.id, details=f"to={user_id}")
-    return chat
+    return as_obj(chat)
 
 
 @router.get("/my-chat", response_model=list[AdminChatResponse])
-async def get_my_chat(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get current player's chat with admin."""
-    messages = db.query(AdminChatMessage).filter(
-        AdminChatMessage.user_id == current_user.id
-    ).order_by(AdminChatMessage.created_at.asc()).all()
+async def get_my_chat(current_user=Depends(get_current_user)):
+    messages = list_docs(
+        COLL.admin_chat_messages,
+        predicate=lambda row: row.get("user_id") == current_user.id,
+        sort_key="created_at",
+        reverse=False,
+    )
 
-    db.query(AdminChatMessage).filter(
-        AdminChatMessage.user_id == current_user.id,
-        AdminChatMessage.sender_role == "admin",
-        AdminChatMessage.is_read == False,
-    ).update({"is_read": True})
-    db.commit()
+    for message in messages:
+        if message.get("sender_role") == "admin" and not message.get("is_read", False):
+            update_doc(COLL.admin_chat_messages, message["id"], {"is_read": True})
+            message["is_read"] = True
 
-    return messages
+    return [as_obj(row) for row in messages]
 
 
 @router.post("/my-chat", response_model=AdminChatResponse)
-async def send_message_to_admin(
-    payload: AdminChatCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Send message to admin from current player."""
+async def send_message_to_admin(payload: AdminChatCreate, current_user=Depends(get_current_user)):
     message = payload.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    chat = AdminChatMessage(
-        user_id=current_user.id,
-        sender_role="player",
-        message=message,
-        is_read=False,
+    chat = create_doc(
+        COLL.admin_chat_messages,
+        {
+            "user_id": current_user.id,
+            "sender_role": "player",
+            "message": message,
+            "is_read": False,
+            "created_at": now_utc(),
+        },
     )
-    db.add(chat)
-    db.commit()
-    db.refresh(chat)
 
     log_action("Player chat message sent", user_id=current_user.id)
-    return chat
+    return as_obj(chat)

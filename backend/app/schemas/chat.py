@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Union
 
 
 class AdminChatCreate(BaseModel):
@@ -8,7 +9,7 @@ class AdminChatCreate(BaseModel):
 
 class AdminChatResponse(BaseModel):
     id: int
-    user_id: int
+    user_id: Union[int, str]
     sender_role: str
     message: str
     is_read: bool

@@ -46,6 +46,51 @@ export function MatchesPage() {
     commentary: '',
   });
 
+  const [isLoading, setIsLoading] = useState(false);
+  const [showUmpireGuide, setShowUmpireGuide] = useState(true);
+  const [showMatchHistory, setShowMatchHistory] = useState(false);
+  const [matchHistoryData, setMatchHistoryData] = useState([]);
+
+  // Helper function to extract error message from various error formats
+  const getErrorMessage = (err) => {
+    if (!err) return 'An unknown error occurred';
+    
+    // If it's an axios error with response data
+    if (err.response?.data) {
+      const data = err.response.data;
+      
+      // Check for detail field (common pattern)
+      if (typeof data.detail === 'string') return data.detail;
+      if (typeof data.detail === 'object' && data.detail?.msg) return data.detail.msg;
+      
+      // Check for message field
+      if (typeof data.message === 'string') return data.message;
+      
+      // Check for array of validation errors (Pydantic)
+      if (Array.isArray(data)) {
+        return data.map(e => e.msg || e.detail || JSON.stringify(e)).join('; ');
+      }
+      
+      // If data is an object with msg field
+      if (typeof data.msg === 'string') return data.msg;
+      
+      // Try to stringify if it's an object
+      if (typeof data === 'object') {
+        try {
+          return JSON.stringify(data);
+        } catch (e) {
+          return 'Invalid server response';
+        }
+      }
+    }
+    
+    // Use error message
+    if (typeof err.message === 'string') return err.message;
+    
+    // Fallback
+    return 'An error occurred';
+  };
+
   const user = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem('user') || '{}');
@@ -171,39 +216,96 @@ export function MatchesPage() {
 
   const handleTeamSetup = async () => {
     if (!selectedMatchId) {
+      setError('No match selected');
       return;
     }
 
+    if (teamAIds.length === 0 || teamBIds.length === 0) {
+      setError('Please select at least one player for each team');
+      return;
+    }
+
+    setIsLoading(true);
     setError('');
     setMessage('');
 
     try {
-      await matchesService.setupTeams(selectedMatchId, {
-        team_a_player_ids: teamAIds.map(Number),
-        team_b_player_ids: teamBIds.map(Number),
-      });
-      setMessage('Teams saved');
-      await fetchMatchDetail(selectedMatchId);
+      // Send player IDs as-is (they are Firebase UIDs from the player objects)
+      const payload = {
+        team_a_player_ids: teamAIds,
+        team_b_player_ids: teamBIds,
+      };
+      
+      console.log('Team A IDs:', teamAIds);
+      console.log('Team B IDs:', teamBIds);
+      console.log('Team setup payload:', payload);
+      await matchesService.setupTeams(selectedMatchId, payload);
+      setMessage('Teams saved successfully!');
+      
+      // Refresh match details
+      try {
+        await fetchMatchDetail(selectedMatchId);
+      } catch (detailErr) {
+        console.error('Error refreshing match details:', detailErr);
+        // Don't show error for refresh failures, just continue
+      }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to save teams');
+      const errorMsg = getErrorMessage(err);
+      console.error('Team setup error:', err);
+      setError(String(errorMsg)); // Ensure it's always a string
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleStartMatch = async () => {
     if (!selectedMatchId) {
+      setError('No match selected');
       return;
     }
 
+    if (teamAIds.length === 0 || teamBIds.length === 0) {
+      setError('Please select at least one player for each team and click "Save Teams" first');
+      return;
+    }
+
+    setIsLoading(true);
     setError('');
     setMessage('');
 
     try {
+      // Send player IDs as-is (they are Firebase UIDs from the player objects)
+      const payload = {
+        team_a_player_ids: teamAIds,
+        team_b_player_ids: teamBIds,
+      };
+      
+      console.log('Start match payload:', payload);
+      
+      // First, ensure teams are saved
+      await matchesService.setupTeams(selectedMatchId, payload);
+      console.log('Teams saved, starting match...');
+
+      // Then start the match
       await matchesService.startMatch(selectedMatchId, { batting_team: ballForm.batting_team });
-      setMessage('Match started');
-      await fetchMatchDetail(selectedMatchId);
-      setCurrentStep(3);
+      
+      setMessage('Match started successfully!');
+      
+      // Refresh match details
+      try {
+        await fetchMatchDetail(selectedMatchId);
+        setCurrentStep(3);
+      } catch (detailErr) {
+        console.error('Error refreshing match details:', detailErr);
+        // Still move to step 3 even if refresh fails
+        setCurrentStep(3);
+      }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to start match');
+      const errorMsg = getErrorMessage(err);
+      console.error('Start match error:', err);
+      setError(String(errorMsg)); // Ensure it's always a string
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -217,9 +319,12 @@ export function MatchesPage() {
     setMessage('');
 
     try {
+      // Use current_innings from the match instead of manual ballForm.innings
+      const currentInnings = selectedMatch?.match?.current_innings || 1;
+      
       const res = await matchesService.recordBall(selectedMatchId, {
         ...ballForm,
-        innings: Number(ballForm.innings),
+        innings: Number(currentInnings),
         over_number: Number(ballForm.over_number),
         ball_number: Number(ballForm.ball_number),
         striker_id: ballForm.striker_id ? Number(ballForm.striker_id) : null,
@@ -264,8 +369,8 @@ export function MatchesPage() {
     }
   };
 
-  const teamAOptions = players.filter((p) => !teamBIds.includes(String(p.id)));
-  const teamBOptions = players.filter((p) => !teamAIds.includes(String(p.id)));
+  const teamAOptions = players.filter((p) => !teamBIds.includes(String(p.id)) && !teamAIds.includes(String(p.id)));
+  const teamBOptions = players.filter((p) => !teamAIds.includes(String(p.id)) && !teamBIds.includes(String(p.id)));
   const filteredTeamAOptions = teamAOptions.filter((p) =>
     p.name.toLowerCase().includes(teamASearch.toLowerCase())
   );
@@ -291,6 +396,20 @@ export function MatchesPage() {
       return 'COMPLETED';
     }
     return 'SETUP';
+  };
+
+  const handleShowMatchHistory = async () => {
+    if (!selectedMatchId) return;
+    
+    try {
+      // Fetch all ball events for the match
+      const scoreRes = await matchesService.getScoreboard(selectedMatchId, 1);
+      const allBalls = scoreRes.data?.all_balls || [];
+      setMatchHistoryData(allBalls);
+      setShowMatchHistory(true);
+    } catch (err) {
+      setError('Could not load match history');
+    }
   };
 
   return (
@@ -351,15 +470,6 @@ export function MatchesPage() {
                 placeholder="Team B name"
                 value={createForm.team_b_name}
                 onChange={(e) => setCreateForm((p) => ({ ...p, team_b_name: e.target.value }))}
-                disabled={!canCreateMatch}
-                required
-              />
-              <input
-                type="number"
-                min="1"
-                max="50"
-                value={createForm.overs_per_innings}
-                onChange={(e) => setCreateForm((p) => ({ ...p, overs_per_innings: e.target.value }))}
                 disabled={!canCreateMatch}
                 required
               />
@@ -453,8 +563,75 @@ export function MatchesPage() {
 
                 <div className={styles.teamSetup}>
                   <div className={styles.teamColumn}>
-                    <div className={styles.teamHeaderRow}>
-                      <label>Team A Players ({teamAIds.length})</label>
+                    <div className={styles.teamBox}>
+                      <div className={styles.teamBoxHeader}>
+                        <h3>{selectedMatch.match.team_a_name}</h3>
+                        <span className={styles.playerCount}>{teamAIds.length} selected</span>
+                      </div>
+                      
+                      <input
+                        className={styles.playerSearch}
+                        placeholder={`Search ${selectedMatch.match.team_a_name} players...`}
+                        value={teamASearch}
+                        onChange={(e) => setTeamASearch(e.target.value)}
+                      />
+
+                      {/* Selected Players Section */}
+                      {selectedTeamAPlayers.length > 0 && (
+                        <div className={styles.selectedSection}>
+                          <div className={styles.sectionLabel}>Selected Players</div>
+                          <div className={styles.playerGrid}>
+                            {selectedTeamAPlayers.map((p) => (
+                              <div key={`a-${p.id}`} className={styles.playerCard + ' ' + styles.selected}>
+                                <div className={styles.playerInfo}>
+                                  <div className={styles.playerName}>{p.name}</div>
+                                  <div className={styles.playerRole}>{p.role}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className={styles.removeBtn}
+                                  onClick={() => setTeamAIds((prev) => prev.filter((id) => id !== String(p.id)))}
+                                  title="Remove from team"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Available Players Section */}
+                      <div className={styles.availableSection}>
+                        <div className={styles.sectionLabel}>Available Players</div>
+                        {filteredTeamAOptions.length > 0 ? (
+                          <div className={styles.playerGrid}>
+                            {filteredTeamAOptions.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className={styles.playerCard}
+                                onClick={() => setTeamAIds((prev) => [...prev, String(p.id)])}
+                                title={`Add ${p.name} to ${selectedMatch.match.team_a_name}`}
+                              >
+                                <div className={styles.playerInfo}>
+                                  <div className={styles.playerName}>{p.name}</div>
+                                  <div className={styles.playerStats}>
+                                    <span>🏃 {p.runs || 0}</span>
+                                    <span>⚡ {p.matches || 0}</span>
+                                  </div>
+                                </div>
+                                <div className={styles.addIcon}>+</div>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className={styles.emptyState}>
+                            {teamASearch ? 'No players matching your search' : 'All available players are already selected'}
+                          </div>
+                        )}
+                      </div>
+
                       <div className={styles.teamActions}>
                         <button
                           type="button"
@@ -463,46 +640,93 @@ export function MatchesPage() {
                               Array.from(new Set([...prev, ...filteredTeamAOptions.map((p) => String(p.id))]))
                             )
                           }
+                          className={styles.actionBtn}
+                          disabled={filteredTeamAOptions.length === 0}
                         >
-                          Select Visible
+                          ✓ Select All
                         </button>
-                        <button type="button" onClick={() => setTeamAIds([])}>Clear</button>
-                      </div>
-                    </div>
-                    <input
-                      className={styles.teamSearch}
-                      placeholder="Search Team A players"
-                      value={teamASearch}
-                      onChange={(e) => setTeamASearch(e.target.value)}
-                    />
-                    <select
-                      multiple
-                      value={teamAIds}
-                      onChange={(e) => setTeamAIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                    >
-                      {filteredTeamAOptions.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-
-                    <div className={styles.selectedList}>
-                      {selectedTeamAPlayers.map((p) => (
                         <button
-                          key={`a-${p.id}`}
                           type="button"
-                          className={styles.selectedChip}
-                          onClick={() => setTeamAIds((prev) => prev.filter((id) => id !== String(p.id)))}
+                          onClick={() => setTeamAIds([])}
+                          className={styles.actionBtn + ' ' + styles.secondary}
+                          disabled={teamAIds.length === 0}
                         >
-                          {p.name} x
+                          ✕ Clear
                         </button>
-                      ))}
-                      {selectedTeamAPlayers.length === 0 && <span className={styles.note}>No players selected</span>}
+                      </div>
                     </div>
                   </div>
 
                   <div className={styles.teamColumn}>
-                    <div className={styles.teamHeaderRow}>
-                      <label>Team B Players ({teamBIds.length})</label>
+                    <div className={styles.teamBox}>
+                      <div className={styles.teamBoxHeader}>
+                        <h3>{selectedMatch.match.team_b_name}</h3>
+                        <span className={styles.playerCount}>{teamBIds.length} selected</span>
+                      </div>
+                      
+                      <input
+                        className={styles.playerSearch}
+                        placeholder={`Search ${selectedMatch.match.team_b_name} players...`}
+                        value={teamBSearch}
+                        onChange={(e) => setTeamBSearch(e.target.value)}
+                      />
+
+                      {/* Selected Players Section */}
+                      {selectedTeamBPlayers.length > 0 && (
+                        <div className={styles.selectedSection}>
+                          <div className={styles.sectionLabel}>Selected Players</div>
+                          <div className={styles.playerGrid}>
+                            {selectedTeamBPlayers.map((p) => (
+                              <div key={`b-${p.id}`} className={styles.playerCard + ' ' + styles.selected}>
+                                <div className={styles.playerInfo}>
+                                  <div className={styles.playerName}>{p.name}</div>
+                                  <div className={styles.playerRole}>{p.role}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className={styles.removeBtn}
+                                  onClick={() => setTeamBIds((prev) => prev.filter((id) => id !== String(p.id)))}
+                                  title="Remove from team"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Available Players Section */}
+                      <div className={styles.availableSection}>
+                        <div className={styles.sectionLabel}>Available Players</div>
+                        {filteredTeamBOptions.length > 0 ? (
+                          <div className={styles.playerGrid}>
+                            {filteredTeamBOptions.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className={styles.playerCard}
+                                onClick={() => setTeamBIds((prev) => [...prev, String(p.id)])}
+                                title={`Add ${p.name} to ${selectedMatch.match.team_b_name}`}
+                              >
+                                <div className={styles.playerInfo}>
+                                  <div className={styles.playerName}>{p.name}</div>
+                                  <div className={styles.playerStats}>
+                                    <span>🏃 {p.runs || 0}</span>
+                                    <span>⚡ {p.matches || 0}</span>
+                                  </div>
+                                </div>
+                                <div className={styles.addIcon}>+</div>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className={styles.emptyState}>
+                            {teamBSearch ? 'No players matching your search' : 'All available players are already selected'}
+                          </div>
+                        )}
+                      </div>
+
                       <div className={styles.teamActions}>
                         <button
                           type="button"
@@ -511,48 +735,40 @@ export function MatchesPage() {
                               Array.from(new Set([...prev, ...filteredTeamBOptions.map((p) => String(p.id))]))
                             )
                           }
+                          className={styles.actionBtn}
+                          disabled={filteredTeamBOptions.length === 0}
                         >
-                          Select Visible
+                          ✓ Select All
                         </button>
-                        <button type="button" onClick={() => setTeamBIds([])}>Clear</button>
-                      </div>
-                    </div>
-                    <input
-                      className={styles.teamSearch}
-                      placeholder="Search Team B players"
-                      value={teamBSearch}
-                      onChange={(e) => setTeamBSearch(e.target.value)}
-                    />
-                    <select
-                      multiple
-                      value={teamBIds}
-                      onChange={(e) => setTeamBIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                    >
-                      {filteredTeamBOptions.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-
-                    <div className={styles.selectedList}>
-                      {selectedTeamBPlayers.map((p) => (
                         <button
-                          key={`b-${p.id}`}
                           type="button"
-                          className={styles.selectedChip}
-                          onClick={() => setTeamBIds((prev) => prev.filter((id) => id !== String(p.id)))}
+                          onClick={() => setTeamBIds([])}
+                          className={styles.actionBtn + ' ' + styles.secondary}
+                          disabled={teamBIds.length === 0}
                         >
-                          {p.name} x
+                          ✕ Clear
                         </button>
-                      ))}
-                      {selectedTeamBPlayers.length === 0 && <span className={styles.note}>No players selected</span>}
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 <div className={styles.rowButtons}>
                   <button type="button" onClick={() => setCurrentStep(1)}>Back</button>
-                  <button type="button" onClick={handleTeamSetup}>Save Teams</button>
-                  <button type="button" onClick={handleStartMatch}>Start Match</button>
+                  <button 
+                    type="button" 
+                    onClick={handleTeamSetup}
+                    disabled={teamAIds.length === 0 || teamBIds.length === 0 || isLoading}
+                  >
+                    {isLoading ? 'Processing...' : 'Save Teams'}
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={handleStartMatch}
+                    disabled={teamAIds.length === 0 || teamBIds.length === 0 || isLoading}
+                  >
+                    {isLoading ? 'Starting...' : 'Start Match'}
+                  </button>
                 </div>
               </>
             )}
@@ -565,30 +781,62 @@ export function MatchesPage() {
             {!selectedMatch && <p>Select a match from step 1 first.</p>}
             {selectedMatch && (
               <>
-                <div className={styles.umpireGuide}>
-                  <h3>Quick Guide</h3>
-                  <div className={styles.guideGrid}>
-                    <p><strong>Innings:</strong> 1 for first innings, 2 for second innings.</p>
-                    <p><strong>Over/Ball:</strong> Auto-generated by system after each ball.</p>
-                    <p><strong>Runs:</strong> Runs scored from bat on that ball.</p>
-                    <p><strong>Extras:</strong> Extra runs (wide/no-ball/bye/leg bye).</p>
-                    <p><strong>Wicket:</strong> Tick if wicket fell on this ball.</p>
-                    <p><strong>Commentary:</strong> Short note like "Cover drive for four".</p>
-                  </div>
-                </div>
-
-                <form onSubmit={handleBallSubmit}>
-                  <div className={styles.formRow}>
-                    <div className={styles.fieldGroup}>
-                      <label className={styles.fieldLabel}>Innings</label>
-                      <select
-                        value={ballForm.innings}
-                        onChange={(e) => setBallForm((p) => ({ ...p, innings: e.target.value }))}
+                {showUmpireGuide && (
+                  <div className={styles.umpireGuide}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <h3 style={{ margin: 0 }}>Quick Guide</h3>
+                      <button 
+                        type="button"
+                        onClick={() => setShowUmpireGuide(false)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          fontSize: '20px',
+                          cursor: 'pointer',
+                          color: '#305d57',
+                          padding: '0 4px',
+                          lineHeight: 1,
+                        }}
+                        title="Close guide"
                       >
-                        {inningsOptions.map((opt) => (
-                          <option key={opt} value={opt}>{opt}</option>
-                        ))}
-                      </select>
+                        ✕
+                      </button>
+                    </div>
+                    <div className={styles.guideGrid}>
+                      <p><strong>Batting Team:</strong> Select which team is batting in current innings.</p>
+                      <p><strong>Innings:</strong> Auto-set based on match progress. Team A bats 1st, Team B bats in 2nd innings.</p>
+                      <p><strong>Runs:</strong> Runs scored from bat on that ball.</p>
+                      <p><strong>Extras:</strong> Extra runs (wide/no-ball/bye/leg bye).</p>
+                      <p><strong>Wicket:</strong> Tick if wicket fell on this ball.</p>
+                      <p><strong>Commentary:</strong> Short note like "Cover drive for four".</p>
+                    </div>
+                  </div>
+                )}
+
+                {!isCompletedMatch ? (
+                  <>
+                    <form onSubmit={handleBallSubmit}>
+                      <div className={styles.formRow}>
+                        <div className={styles.fieldGroup}>
+                          <label className={styles.fieldLabel}>Batting Team</label>
+                          <select
+                            value={ballForm.batting_team}
+                            onChange={(e) => {
+                              const newTeam = e.target.value;
+                              setBallForm((p) => ({ ...p, batting_team: newTeam }));
+                            }}
+                          >
+                            <option value="A">{selectedMatch?.match?.team_a_name || 'Team A'} (Batting)</option>
+                            <option value="B">{selectedMatch?.match?.team_b_name || 'Team B'} (Batting)</option>
+                          </select>
+                        </div>
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.fieldLabel}>Current Innings</label>
+                      <input
+                        type="number"
+                        value={selectedMatch?.match?.current_innings || ballForm.innings}
+                        readOnly
+                      />
                     </div>
                     <div className={styles.fieldGroup}>
                       <label className={styles.fieldLabel}>Over Number</label>
@@ -608,16 +856,6 @@ export function MatchesPage() {
                         value={ballForm.ball_number}
                         readOnly
                       />
-                    </div>
-                    <div className={styles.fieldGroup}>
-                      <label className={styles.fieldLabel}>Batting Team</label>
-                      <select
-                        value={ballForm.batting_team}
-                        onChange={(e) => setBallForm((p) => ({ ...p, batting_team: e.target.value }))}
-                      >
-                        <option value="A">Batting Team A</option>
-                        <option value="B">Batting Team B</option>
-                      </select>
                     </div>
                   </div>
 
@@ -696,11 +934,11 @@ export function MatchesPage() {
 
                   <div className={styles.rowButtons}>
                     <button type="button" onClick={() => setCurrentStep(2)}>Back</button>
-                    <button type="submit" disabled={isCompletedMatch}>Record Ball</button>
+                    <button type="submit">Record Ball</button>
                   </div>
                 </form>
-
-                {isCompletedMatch && (
+                  </>
+                ) : (
                   <p className={styles.completedHint}>
                     This match is completed. Live scoring inputs are now read-only.
                   </p>
@@ -774,7 +1012,14 @@ export function MatchesPage() {
                     </div>
 
                     {scoreboard.result_text && (
-                      <p className={styles.resultBadge}>{scoreboard.result_text}</p>
+                      <p 
+                        className={styles.resultBadge}
+                        onClick={handleShowMatchHistory}
+                        style={{ cursor: 'pointer' }}
+                        title="Click to view match history"
+                      >
+                        {scoreboard.result_text}
+                      </p>
                     )}
 
                     {!isCompletedMatch && (
@@ -812,6 +1057,120 @@ export function MatchesPage() {
               </>
             )}
           </section>
+        )}
+
+        {showMatchHistory && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}>
+            <div style={{
+              background: 'white',
+              borderRadius: '16px',
+              padding: '24px',
+              maxWidth: '800px',
+              width: '90%',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h2 style={{ margin: 0, color: '#173a36' }}>Match History</h2>
+                <button 
+                  onClick={() => setShowMatchHistory(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '24px',
+                    cursor: 'pointer',
+                    color: '#305d57',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p style={{ color: '#476b67', marginBottom: '16px' }}>
+                <strong>{selectedMatch?.match?.team_a_name} vs {selectedMatch?.match?.team_b_name}</strong>
+              </p>
+
+              {matchHistoryData && matchHistoryData.length > 0 ? (
+                <div>
+                  {Object.entries(
+                    matchHistoryData.reduce((acc, ball) => {
+                      const inning = `Innings ${ball.innings}`;
+                      if (!acc[inning]) acc[inning] = [];
+                      acc[inning].push(ball);
+                      return acc;
+                    }, {})
+                  ).map(([inning, balls]) => (
+                    <div key={inning} style={{ marginBottom: '20px' }}>
+                      <h3 style={{ color: '#0f6f62', borderBottom: '2px solid #d0e8e3', paddingBottom: '8px' }}>
+                        {inning}
+                      </h3>
+                      <div style={{ display: 'grid', gap: '8px' }}>
+                        {balls.map((ball, idx) => (
+                          <div 
+                            key={idx}
+                            style={{
+                              background: '#f4faf8',
+                              border: '1px solid #d0e8e3',
+                              borderRadius: '8px',
+                              padding: '12px',
+                              fontSize: '13px',
+                              color: '#1d4b45',
+                            }}
+                          >
+                            <strong>Over {ball.over_number}.{ball.ball_number}</strong>
+                            {' | '}
+                            Batting: {ball.batting_team === 'A' ? selectedMatch?.match?.team_a_name : selectedMatch?.match?.team_b_name}
+                            {' | '}
+                            Runs: {ball.runs_off_bat} + {ball.extras || 0} extra
+                            {ball.extra_type && ` (${ball.extra_type})`}
+                            {ball.is_wicket && ' | ⚠️ WICKET'}
+                            {ball.wicket_type && ` (${ball.wicket_type})`}
+                            {ball.commentary && (
+                              <>
+                                <br />
+                                <em>{ball.commentary}</em>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: '#567a74' }}>No ball data available for this match.</p>
+              )}
+
+              <div style={{ marginTop: '20px', textAlign: 'center' }}>
+                <button 
+                  onClick={() => setShowMatchHistory(false)}
+                  style={{
+                    background: '#0f6f62',
+                    color: 'white',
+                    border: 'none',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

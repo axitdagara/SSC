@@ -63,6 +63,10 @@
   transition: background-color 0.3s;
 }
 
+.authBox button + button {
+  margin-top: 10px;
+}
+
 .authBox button:hover:not(:disabled) {
   opacity: 0.92;
 }
@@ -79,6 +83,15 @@
   border-radius: 10px;
   margin-bottom: 20px;
   border-left: 4px solid #cc4e48;
+}
+
+.success {
+  background-color: #e7f8f1;
+  color: #155d46;
+  padding: 12px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  border-left: 4px solid #2f9a78;
 }
 
 .authBox p {

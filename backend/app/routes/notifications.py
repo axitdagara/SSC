@@ -1,35 +1,61 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from app.database import get_db
-from app.models import Notification, User
+
 from app.middleware.auth import get_current_user
 from app.schemas import NotificationResponse
+from app.utils.firestore_data import COLL, as_obj, create_doc, first_doc, list_docs, now_utc, update_doc, _parse_datetime
 from app.utils.logger import log_action
-from app.utils.premium import check_and_downgrade_premium
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 
+def _downgrade_if_expired(user: dict) -> bool:
+    expiry = user.get("premium_expiry")
+    if user.get("is_premium") and expiry:
+        # Parse expiry to timezone-aware datetime
+        expiry_dt = _parse_datetime(expiry) if isinstance(expiry, str) else expiry
+        
+        # Ensure expiry_dt is timezone-aware
+        if isinstance(expiry_dt, datetime) and expiry_dt.tzinfo is None:
+            expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+        
+        # Check if premium has expired
+        if expiry_dt and now_utc() >= expiry_dt:
+            update_doc(COLL.users, user["id"], {"is_premium": False, "premium_expiry": None, "updated_at": now_utc()})
+        create_doc(
+            COLL.notifications,
+            {
+                "user_id": user["id"],
+                "title": "Premium Membership Expired",
+                "message": "Your premium membership has expired. Upgrade again to get featured!",
+                "notification_type": "premium_expiry",
+                "is_read": False,
+                "created_at": now_utc(),
+            },
+        )
+        return True
+    return False
+
+
 @router.get("/me", response_model=list[NotificationResponse])
-async def get_my_notifications(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get notifications for current user."""
-    notifications = db.query(Notification).filter(
-        Notification.user_id == current_user.id
-    ).order_by(Notification.created_at.desc()).limit(100).all()
-    return notifications
+async def get_my_notifications(current_user=Depends(get_current_user)):
+    notifications = list_docs(
+        COLL.notifications,
+        predicate=lambda row: row.get("user_id") == current_user.id,
+        sort_key="created_at",
+        reverse=True,
+        limit=100,
+    )
+    return [as_obj(row) for row in notifications]
 
 
 @router.post("/check-expiry")
-async def check_premium_expiry_notification(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Create expiry warning notification if premium is close to expiry."""
-    expired = check_and_downgrade_premium(db, current_user)
+async def check_premium_expiry_notification(current_user=Depends(get_current_user)):
+    user = first_doc(COLL.users, predicate=lambda row: row.get("id") == current_user.id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    expired = _downgrade_if_expired(user)
 
     if expired:
         return {
@@ -38,14 +64,15 @@ async def check_premium_expiry_notification(
             "notification_created": True,
         }
 
-    if not current_user.is_premium or not current_user.premium_expiry:
+    if not user.get("is_premium") or not user.get("premium_expiry"):
         return {
             "message": "No active premium subscription.",
             "days_left": None,
             "notification_created": False,
         }
 
-    days_left = (current_user.premium_expiry - datetime.utcnow()).total_seconds() / 86400
+    expiry_dt = _parse_datetime(user["premium_expiry"]) if isinstance(user["premium_expiry"], str) else user["premium_expiry"]
+    days_left = (expiry_dt - now_utc()).total_seconds() / 86400 if expiry_dt else None
 
     if days_left > 3:
         return {
@@ -61,11 +88,12 @@ async def check_premium_expiry_notification(
             "notification_created": False,
         }
 
-    existing = db.query(Notification).filter(
-        Notification.user_id == current_user.id,
-        Notification.notification_type == "premium_expiry_warning",
-        Notification.is_read == False,
-    ).first()
+    existing = first_doc(
+        COLL.notifications,
+        predicate=lambda row: row.get("user_id") == current_user.id
+        and row.get("notification_type") == "premium_expiry_warning"
+        and not row.get("is_read", False),
+    )
 
     if existing:
         return {
@@ -74,14 +102,17 @@ async def check_premium_expiry_notification(
             "notification_created": False,
         }
 
-    notification = Notification(
-        user_id=current_user.id,
-        title="Premium Expiry Reminder",
-        message=f"Your premium membership expires in {int(round(days_left))} day(s). Renew to stay featured.",
-        notification_type="premium_expiry_warning",
+    create_doc(
+        COLL.notifications,
+        {
+            "user_id": current_user.id,
+            "title": "Premium Expiry Reminder",
+            "message": f"Your premium membership expires in {int(round(days_left))} day(s). Renew to stay featured.",
+            "notification_type": "premium_expiry_warning",
+            "is_read": False,
+            "created_at": now_utc(),
+        },
     )
-    db.add(notification)
-    db.commit()
 
     log_action("Premium expiry warning created", user_id=current_user.id)
 
@@ -93,36 +124,27 @@ async def check_premium_expiry_notification(
 
 
 @router.put("/{notification_id}/read")
-async def mark_notification_as_read(
-    notification_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Mark a notification as read."""
-    notification = db.query(Notification).filter(
-        Notification.id == notification_id,
-        Notification.user_id == current_user.id,
-    ).first()
+async def mark_notification_as_read(notification_id: int, current_user=Depends(get_current_user)):
+    notification = first_doc(
+        COLL.notifications,
+        predicate=lambda row: row.get("id") == notification_id and row.get("user_id") == current_user.id,
+    )
 
     if not notification:
         raise HTTPException(status_code=404, detail="Notification not found")
 
-    notification.is_read = True
-    db.commit()
+    update_doc(COLL.notifications, notification_id, {"is_read": True})
 
     return {"message": "Notification marked as read"}
 
 
 @router.put("/read-all")
-async def mark_all_notifications_as_read(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Mark all notifications as read."""
-    db.query(Notification).filter(
-        Notification.user_id == current_user.id,
-        Notification.is_read == False,
-    ).update({"is_read": True})
-    db.commit()
+async def mark_all_notifications_as_read(current_user=Depends(get_current_user)):
+    rows = list_docs(
+        COLL.notifications,
+        predicate=lambda row: row.get("user_id") == current_user.id and not row.get("is_read", False),
+    )
+    for row in rows:
+        update_doc(COLL.notifications, row["id"], {"is_read": True})
 
     return {"message": "All notifications marked as read"}

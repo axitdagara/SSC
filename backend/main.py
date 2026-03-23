@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from app.config import settings
-from app.database import init_db
 from app.middleware import LoggingMiddleware, RateLimitMiddleware
 from app.middleware.auth import security
 from app.routes import (
@@ -16,9 +15,6 @@ from app.routes import (
     notifications_router,
     matches_router,
 )
-
-# Initialize database
-init_db()
 
 # Create FastAPI app
 app = FastAPI(

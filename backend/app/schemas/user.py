@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 
 class UserRegister(BaseModel):
@@ -15,7 +15,7 @@ class UserLogin(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: int
+    id: Union[int, str] = Field(..., description="User ID (can be integer or Firebase UID string)")
     name: str
     email: str
     role: str
@@ -30,7 +30,7 @@ class UserResponse(BaseModel):
     highest_score: int
     is_premium: bool
     premium_expiry: Optional[datetime] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
     is_active: bool
 
     class Config:

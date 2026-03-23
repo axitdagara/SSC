@@ -3,12 +3,24 @@ FROM node:18-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY frontend/ .
 
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=${VITE_API_URL}
+ARG VITE_FIREBASE_API_KEY=
+ENV VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}
+ARG VITE_FIREBASE_AUTH_DOMAIN=
+ENV VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}
+ARG VITE_FIREBASE_PROJECT_ID=
+ENV VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}
+ARG VITE_FIREBASE_STORAGE_BUCKET=
+ENV VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}
+ARG VITE_FIREBASE_MESSAGING_SENDER_ID=
+ENV VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}
+ARG VITE_FIREBASE_APP_ID=
+ENV VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}
 RUN npm run build
 
 # ============================================
@@ -22,13 +34,13 @@ WORKDIR /app
 
 # Install Nginx
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nginx \
-    && rm -rf /var/lib/apt/lists/*
+	nginx \
+	&& rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python dependencies
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+	pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code
 COPY backend/ ./backend/
@@ -43,7 +55,7 @@ COPY nginx-huggingface.conf /etc/nginx/conf.d/default.conf
 COPY docker-entrypoint.sh /app/
 RUN chmod +x /app/docker-entrypoint.sh
 
-# Create data directory for SQLite
+# Create data directory for SQLite fallback
 RUN mkdir -p /app/data
 
 EXPOSE 7860

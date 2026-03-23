@@ -1,48 +1,79 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy import func
-from sqlalchemy.orm import Session
-from datetime import datetime
+from fastapi import APIRouter
 from typing import List
-from app.database import get_db
-from app.models import User, PerformanceLog, Payment, FinanceTransaction
+from datetime import datetime, timezone
+from google.api_core.exceptions import ResourceExhausted
+
 from app.schemas import UserResponse
-from app.utils.premium import check_and_downgrade_premium
+from app.utils.firestore_data import COLL, as_obj, list_docs, now_utc, update_doc, _parse_datetime, normalize_user
+from app.utils.cache import get_cache
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
+def _check_and_downgrade(player: dict) -> dict:
+    expiry = player.get("premium_expiry")
+    if player.get("is_premium") and expiry:
+        # Parse expiry to timezone-aware datetime
+        expiry_dt = _parse_datetime(expiry) if isinstance(expiry, str) else expiry
+        
+        # Ensure expiry_dt is timezone-aware
+        if isinstance(expiry_dt, datetime) and expiry_dt.tzinfo is None:
+            expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+        
+        # Check if premium has expired
+        if expiry_dt and now_utc() >= expiry_dt:
+            # Use _doc_id (actual Firestore document ID) if available, otherwise use id
+            doc_id = player.get("_doc_id") or player.get("id")
+            player = update_doc(COLL.users, doc_id, {"is_premium": False, "premium_expiry": None, "updated_at": now_utc()}) or player
+    return player
+
+
 @router.get("/overview")
-async def get_dashboard_overview(db: Session = Depends(get_db)):
-    """Get dashboard overview stats"""
+async def get_dashboard_overview():
+    cache = get_cache()
+    
+    def fetch_overview():
+        players = list_docs(COLL.users, predicate=lambda row: row.get("is_active", True))
+        total_players = len(players)
+        premium_players = len([p for p in players if p.get("is_premium")])
+        total_matches = sum(int(p.get("matches", 0)) for p in players)
+        total_runs = sum(int(p.get("runs", 0)) for p in players)
 
-    total_players = db.query(User).filter(User.is_active == True).count()
-    premium_players = db.query(User).filter(User.is_premium == True).count()
-    total_matches = sum([p.matches for p in db.query(User).all()])
-    total_runs = sum([p.runs for p in db.query(User).all()])
-
-    return {
-        "total_players": total_players,
-        "premium_players": premium_players,
-        "total_matches": total_matches,
-        "total_runs": total_runs
-    }
+        return {
+            "total_players": total_players,
+            "premium_players": premium_players,
+            "total_matches": total_matches,
+            "total_runs": total_runs,
+        }
+    
+    try:
+        return cache.get_or_fetch("dashboard_overview", fetch_overview, ttl_seconds=300)
+    except ResourceExhausted:
+        # Fall back to cached data if quota exceeded
+        cached = cache.get("dashboard_overview")
+        if cached:
+            return cached
+        raise
 
 
 @router.get("/extended-overview")
-async def get_extended_overview(db: Session = Depends(get_db)):
-    """Get extended dashboard stats for real-world club overview."""
-    players = db.query(User).filter(User.is_active == True, User.role == "player").all()
+async def get_extended_overview():
+    cache = get_cache()
+    
+    def fetch_extended_overview():
+        players = list_docs(COLL.users, predicate=lambda row: row.get("is_active", True) and row.get("role") == "player")
 
-    total_players = len(players)
-    premium_players = len([player for player in players if player.is_premium])
-    total_matches = sum(player.matches for player in players)
-    total_runs = sum(player.runs for player in players)
-    total_wickets = sum(player.wickets for player in players)
+        total_players = len(players)
+        premium_players = len([player for player in players if player.get("is_premium")])
+        total_matches = sum(int(player.get("matches", 0)) for player in players)
+        total_runs = sum(int(player.get("runs", 0)) for player in players)
+        total_wickets = sum(int(player.get("wickets", 0)) for player in players)
 
-    avg_runs_per_match = round(total_runs / total_matches, 2) if total_matches else 0.0
-    premium_ratio = round((premium_players / total_players) * 100, 2) if total_players else 0.0
+        avg_runs_per_match = round(total_runs / total_matches, 2) if total_matches else 0.0
+        premium_ratio = round((premium_players / total_players) * 100, 2) if total_players else 0.0
 
-    top_performance = db.query(PerformanceLog).order_by(PerformanceLog.performance_rating.desc()).first()
+        top_performance = list_docs(COLL.performance_logs, sort_key="performance_rating", reverse=True, limit=1)
+        top = top_performance[0] if top_performance else None
 
     return {
         "total_players": total_players,
@@ -53,89 +84,97 @@ async def get_extended_overview(db: Session = Depends(get_db)):
         "avg_runs_per_match": avg_runs_per_match,
         "premium_ratio": premium_ratio,
         "top_performance": {
-            "match_date": top_performance.match_date if top_performance else None,
-            "performance_rating": top_performance.performance_rating if top_performance else 0,
-            "runs_scored": top_performance.runs_scored if top_performance else 0,
-            "wickets_taken": top_performance.wickets_taken if top_performance else 0,
+            "match_date": top.get("match_date") if top else None,
+            "performance_rating": top.get("performance_rating", 0) if top else 0,
+            "runs_scored": top.get("runs_scored", 0) if top else 0,
+            "wickets_taken": top.get("wickets_taken", 0) if top else 0,
         },
-    }
+        }
+    
+    try:
+        return cache.get_or_fetch("dashboard_extended_overview", fetch_extended_overview, ttl_seconds=300)
+    except ResourceExhausted:
+        # Fall back to cached data if quota exceeded
+        cached = cache.get("dashboard_extended_overview")
+        if cached:
+            return cached
+        raise
 
 
 @router.get("/featured-players", response_model=List[UserResponse])
-async def get_featured_players(db: Session = Depends(get_db)):
-    """Get featured premium players"""
-    
-    # Get premium players, check expiry
-    premium_players = db.query(User).filter(
-        User.is_premium == True,
-        User.is_active == True
-    ).all()
-
-    for player in premium_players:
-        check_and_downgrade_premium(db, player)
-
-    # Get only confirmed premium players, sorted by runs
-    featured = db.query(User).filter(
-        User.is_premium == True,
-        User.is_active == True
-    ).order_by(User.runs.desc()).limit(5).all()
-
-    return featured
+async def get_featured_players():
+    premium_players = list_docs(
+        COLL.users,
+        predicate=lambda row: row.get("is_premium") and row.get("is_active", True),
+        sort_key="runs",
+        reverse=True,
+        limit=5,
+    )
+    return [normalize_user(_check_and_downgrade(row)) for row in premium_players]
 
 
 @router.get("/recent-players", response_model=List[UserResponse])
-async def get_recent_players(db: Session = Depends(get_db)):
-    """Get recently registered players"""
-
-    recent = db.query(User).filter(
-        User.is_active == True
-    ).order_by(User.created_at.desc()).limit(10).all()
-
-    return recent
+async def get_recent_players():
+    recent = list_docs(
+        COLL.users,
+        predicate=lambda row: row.get("is_active", True),
+        sort_key="created_at",
+        reverse=True,
+        limit=10,
+    )
+    return [normalize_user(row) for row in recent]
 
 
 @router.get("/top-stats")
-async def get_top_stats(db: Session = Depends(get_db)):
-    """Get top statistics"""
+async def get_top_stats():
+    cache = get_cache()
+    
+    def fetch_top_stats():
+        # Fetch active players once and compute top scorers and wicket takers from same list
+        players = list_docs(COLL.users, predicate=lambda row: row.get("is_active", True))
+        
+        # Sort by runs and get top scorer
+        top_scorers = sorted(players, key=lambda x: int(x.get("runs", 0)), reverse=True)
+        top_scorer = top_scorers[0] if top_scorers else None
+        
+        # Sort by wickets and get top wicket taker
+        top_wickets = sorted(players, key=lambda x: int(x.get("wickets", 0)), reverse=True)
+        top_wicket_taker = top_wickets[0] if top_wickets else None
 
-    top_scorer = db.query(User).filter(User.is_active == True).order_by(
-        User.runs.desc()
-    ).first()
-
-    top_wicket_taker = db.query(User).filter(User.is_active == True).order_by(
-        User.wickets.desc()
-    ).first()
-
-    return {
-        "top_scorer": {
-            "name": top_scorer.name if top_scorer else None,
-            "runs": top_scorer.runs if top_scorer else 0
-        },
-        "top_wicket_taker": {
-            "name": top_wicket_taker.name if top_wicket_taker else None,
-            "wickets": top_wicket_taker.wickets if top_wicket_taker else 0
+        return {
+            "top_scorer": {
+                "name": top_scorer.get("name") if top_scorer else None,
+                "runs": top_scorer.get("runs", 0) if top_scorer else 0,
+            },
+            "top_wicket_taker": {
+                "name": top_wicket_taker.get("name") if top_wicket_taker else None,
+                "wickets": top_wicket_taker.get("wickets", 0) if top_wicket_taker else 0,
+            },
         }
-    }
+    
+    try:
+        return cache.get_or_fetch("dashboard_top_stats", fetch_top_stats, ttl_seconds=300)
+    except ResourceExhausted:
+        # Fall back to cached data if quota exceeded
+        cached = cache.get("dashboard_top_stats")
+        if cached:
+            return cached
+        raise
 
 
 @router.get("/charts")
-async def get_dashboard_chart_data(db: Session = Depends(get_db)):
-    """Get chart-friendly dataset for player stats and match trend."""
-    top_players = db.query(User).filter(User.is_active == True).order_by(User.runs.desc()).limit(6).all()
-
-    recent_logs = db.query(PerformanceLog).order_by(PerformanceLog.match_date.desc()).limit(12).all()
-    recent_logs = list(reversed(recent_logs))
+async def get_dashboard_chart_data():
+    top_players = list_docs(COLL.users, predicate=lambda row: row.get("is_active", True), sort_key="runs", reverse=True, limit=6)
+    recent_logs = list_docs(COLL.performance_logs, sort_key="match_date", reverse=False, limit=12)
 
     return {
-        "top_players_runs": [
-            {"name": player.name, "runs": player.runs} for player in top_players
-        ],
+        "top_players_runs": [{"name": player.get("name"), "runs": player.get("runs", 0)} for player in top_players],
         "recent_match_trend": [
             {
-                "label": log.match_date.strftime("%d %b"),
-                "runs": log.runs_scored,
-                "wickets": log.wickets_taken,
-                "rating": log.performance_rating,
+                "label": log.get("match_date").strftime("%d %b") if log.get("match_date") else "N/A",
+                "runs": log.get("runs_scored", 0),
+                "wickets": log.get("wickets_taken", 0),
+                "rating": log.get("performance_rating", 0),
             }
             for log in recent_logs
         ],
@@ -143,9 +182,8 @@ async def get_dashboard_chart_data(db: Session = Depends(get_db)):
 
 
 @router.get("/team-ai-insights")
-async def get_team_ai_insights(db: Session = Depends(get_db)):
-    """Generate AI-style team summary from recent performances."""
-    recent_logs = db.query(PerformanceLog).order_by(PerformanceLog.match_date.desc()).limit(30).all()
+async def get_team_ai_insights():
+    recent_logs = list_docs(COLL.performance_logs, sort_key="match_date", reverse=True, limit=30)
 
     if not recent_logs:
         return {
@@ -155,9 +193,9 @@ async def get_team_ai_insights(db: Session = Depends(get_db)):
             "insights": ["Log team matches to unlock AI projections."],
         }
 
-    avg_rating = sum(log.performance_rating for log in recent_logs) / len(recent_logs)
-    avg_runs = sum(log.runs_scored for log in recent_logs) / len(recent_logs)
-    avg_wickets = sum(log.wickets_taken for log in recent_logs) / len(recent_logs)
+    avg_rating = sum(float(log.get("performance_rating", 0)) for log in recent_logs) / len(recent_logs)
+    avg_runs = sum(float(log.get("runs_scored", 0)) for log in recent_logs) / len(recent_logs)
+    avg_wickets = sum(float(log.get("wickets_taken", 0)) for log in recent_logs) / len(recent_logs)
 
     if avg_rating >= 7.5:
         team_form = "excellent"
@@ -188,25 +226,26 @@ async def get_team_ai_insights(db: Session = Depends(get_db)):
 
 
 @router.get("/funds-summary")
-async def get_funds_summary(db: Session = Depends(get_db)):
-    """Get finance summary for dashboard cards."""
-    total_collected = db.query(func.coalesce(func.sum(Payment.amount), 0.0)).filter(
-        Payment.status == "completed"
-    ).scalar() or 0.0
+async def get_funds_summary():
+    payments = list_docs(COLL.payments, predicate=lambda row: row.get("status") == "completed")
+    transactions = list_docs(COLL.finance_transactions)
 
-    manual_credits = db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0)).filter(
-        FinanceTransaction.transaction_type == "credit",
-        FinanceTransaction.category == "manual_credit",
-    ).scalar() or 0.0
-
-    guest_fund_spent = db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0)).filter(
-        FinanceTransaction.transaction_type == "debit",
-        FinanceTransaction.category == "guest_fund",
-    ).scalar() or 0.0
-
-    all_debits = db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0)).filter(
-        FinanceTransaction.transaction_type == "debit",
-    ).scalar() or 0.0
+    total_collected = sum(float(row.get("amount", 0)) for row in payments)
+    manual_credits = sum(
+        float(row.get("amount", 0))
+        for row in transactions
+        if row.get("transaction_type") == "credit" and row.get("category") == "manual_credit"
+    )
+    guest_fund_spent = sum(
+        float(row.get("amount", 0))
+        for row in transactions
+        if row.get("transaction_type") == "debit" and row.get("category") == "guest_fund"
+    )
+    all_debits = sum(
+        float(row.get("amount", 0))
+        for row in transactions
+        if row.get("transaction_type") == "debit"
+    )
 
     remaining_funds = round((total_collected + manual_credits) - all_debits, 2)
 

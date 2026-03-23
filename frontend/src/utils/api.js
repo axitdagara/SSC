@@ -1,4 +1,18 @@
 import axios from 'axios';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  updateProfile,
+} from 'firebase/auth';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import {
+  firebaseAuth,
+  firebaseDb,
+  firebaseGoogleProvider,
+  isFirebaseConfigured,
+} from './firebase';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -11,19 +25,167 @@ const api = axios.create({
 });
 
 // Add token to requests
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+api.interceptors.request.use(async (config) => {
+  let token = localStorage.getItem('token');
+
+  if (isFirebaseConfigured && firebaseAuth?.currentUser) {
+    const firebaseToken = await firebaseAuth.currentUser.getIdToken();
+    if (firebaseToken) {
+      token = firebaseToken;
+      localStorage.setItem('token', firebaseToken);
+    }
+  }
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
 
+const hydrateLocalUserFromBackend = async (accessToken) => {
+  if (accessToken) {
+    localStorage.setItem('token', accessToken);
+  }
+
+  try {
+    const profile = await api.get('/players/me');
+    localStorage.setItem('user', JSON.stringify(profile.data));
+    window.dispatchEvent(new Event('authchange'));
+
+    return {
+      access_token: accessToken,
+      token_type: 'bearer',
+      user: profile.data,
+    };
+  } catch (error) {
+    // If backend profile fetch fails, create a minimal user object from Firebase user state.
+    if (isFirebaseConfigured && firebaseAuth?.currentUser) {
+      const firebaseUser = firebaseAuth.currentUser;
+
+      if (firebaseUser) {
+        const minimalUser = {
+          id: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'player'),
+          role: 'player',
+          is_active: true,
+        };
+        
+        localStorage.setItem('user', JSON.stringify(minimalUser));
+        window.dispatchEvent(new Event('authchange'));
+        
+        return {
+          access_token: accessToken,
+          token_type: 'bearer',
+          user: minimalUser,
+        };
+      }
+    }
+    
+    // Re-throw the original error if fallback also fails
+    throw error;
+  }
+};
+
 export const authService = {
-  register: (name, email, password) =>
-    api.post('/auth/register', { name, email, password }),
-  login: (email, password) =>
-    api.post('/auth/login', { email, password }),
+  register: async (name, email, password) => {
+    if (!isFirebaseConfigured || !firebaseAuth) {
+      return api.post('/auth/register', { name, email, password });
+    }
+
+    try {
+      const cred = await createUserWithEmailAndPassword(firebaseAuth, email, password);
+      if (name) {
+        await updateProfile(cred.user, { displayName: name });
+      }
+
+      if (firebaseDb) {
+        await setDoc(
+          doc(firebaseDb, 'users', cred.user.uid),
+          {
+            uid: cred.user.uid,
+            email,
+            name: name || email.split('@')[0],
+            role: 'player',
+            createdAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      const accessToken = await cred.user.getIdToken();
+      return { data: await hydrateLocalUserFromBackend(accessToken) };
+    } catch (error) {
+      const message = error?.message || 'Registration failed';
+      throw { response: { data: { detail: message } } };
+    }
+
+  },
+
+  login: async (email, password) => {
+    if (!isFirebaseConfigured || !firebaseAuth) {
+      return api.post('/auth/login', { email, password });
+    }
+
+    try {
+      const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      const accessToken = await cred.user.getIdToken();
+      return { data: await hydrateLocalUserFromBackend(accessToken) };
+    } catch (error) {
+      throw { response: { data: { detail: error?.message || 'Login failed' } } };
+    }
+  },
+
+  loginWithGoogle: async () => {
+    if (!isFirebaseConfigured || !firebaseAuth) {
+      throw { response: { data: { detail: 'Firebase is not configured' } } };
+    }
+
+    try {
+      const cred = await signInWithPopup(firebaseAuth, firebaseGoogleProvider);
+
+      if (firebaseDb) {
+        await setDoc(
+          doc(firebaseDb, 'users', cred.user.uid),
+          {
+            uid: cred.user.uid,
+            email: cred.user.email,
+            name: cred.user.displayName || (cred.user.email ? cred.user.email.split('@')[0] : 'player'),
+            role: 'player',
+            lastLoginAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      const accessToken = await cred.user.getIdToken();
+      return { data: await hydrateLocalUserFromBackend(accessToken) };
+    } catch (error) {
+      throw { response: { data: { detail: error?.message || 'Google login failed' } } };
+    }
+  },
+
+  completeSocialLogin: async () => {
+    if (!isFirebaseConfigured || !firebaseAuth?.currentUser) {
+      return null;
+    }
+
+    const accessToken = await firebaseAuth.currentUser.getIdToken();
+    if (!accessToken) {
+      return null;
+    }
+
+    return { data: await hydrateLocalUserFromBackend(accessToken) };
+  },
+
+  logout: async () => {
+    if (isFirebaseConfigured && firebaseAuth) {
+      await signOut(firebaseAuth);
+    }
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.dispatchEvent(new Event('authchange'));
+  },
 };
 
 export const playerService = {

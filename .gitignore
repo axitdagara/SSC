@@ -29,3 +29,5 @@ logs/
 .vscode/
 .idea/
 venv/
+backend/firebase-service-account.json
+backend/*firebase-adminsdk*.json

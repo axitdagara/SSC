@@ -1,29 +1,21 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-from app.config import settings
+from contextlib import contextmanager
 
-# Create engine
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
-)
 
-# Create session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+class _NoDatabase:
+    """Compatibility object for legacy dependencies while moving to Firestore-only."""
 
-# Base class for models
-Base = declarative_base()
+
+@contextmanager
+def _noop_db_context():
+    yield _NoDatabase()
 
 
 def get_db():
-    """Dependency for database session"""
-    db = SessionLocal()
-    try:
+    """Legacy dependency kept for backward compatibility with route signatures."""
+    with _noop_db_context() as db:
         yield db
-    finally:
-        db.close()
 
 
 def init_db():
-    """Initialize database with all tables"""
-    Base.metadata.create_all(bind=engine)
+    """No-op: Firestore does not require SQL table initialization."""
+    return None

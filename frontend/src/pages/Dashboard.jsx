@@ -21,6 +21,7 @@ export function DashboardPage() {
 
         await notificationService.checkExpiry().catch(() => null);
 
+        console.log('📊 Fetching dashboard data...');
         const [
           overviewRes,
           featuredRes,
@@ -31,16 +32,41 @@ export function DashboardPage() {
           fundsRes,
           notificationsRes,
         ] = await Promise.all([
-          dashboardService.getExtendedOverview(),
-          dashboardService.getFeaturedPlayers(),
-          dashboardService.getRecentPlayers(),
-          dashboardService.getTopStats(),
-          dashboardService.getCharts(),
-          dashboardService.getTeamInsights(),
-          dashboardService.getFundsSummary(),
-          notificationService.getMine(),
+          dashboardService.getExtendedOverview().catch(err => {
+            console.error('❌ getExtendedOverview failed:', err.response?.status, err.response?.data);
+            throw err;
+          }),
+          dashboardService.getFeaturedPlayers().catch(err => {
+            console.error('❌ getFeaturedPlayers failed:', err.response?.status, err.response?.data);
+            throw err;
+          }),
+          dashboardService.getRecentPlayers().catch(err => {
+            console.error('❌ getRecentPlayers failed:', err.response?.status, err.response?.data);
+            throw err;
+          }),
+          dashboardService.getTopStats().catch(err => {
+            console.error('❌ getTopStats failed:', err.response?.status, err.response?.data);
+            throw err;
+          }),
+          dashboardService.getCharts().catch(err => {
+            console.error('❌ getCharts failed:', err.response?.status, err.response?.data);
+            throw err;
+          }),
+          dashboardService.getTeamInsights().catch(err => {
+            console.error('❌ getTeamInsights failed:', err.response?.status, err.response?.data);
+            throw err;
+          }),
+          dashboardService.getFundsSummary().catch(err => {
+            console.error('❌ getFundsSummary failed:', err.response?.status, err.response?.data);
+            throw err;
+          }),
+          notificationService.getMine().catch(err => {
+            console.error('❌ getMine notifications failed:', err.response?.status, err.response?.data);
+            throw err;
+          }),
         ]);
 
+        console.log('✅ All dashboard data loaded successfully');
         setOverview(overviewRes.data);
         setFeatured(featuredRes.data || []);
         setRecent(recentRes.data || []);
@@ -50,8 +76,9 @@ export function DashboardPage() {
         setFunds(fundsRes.data || null);
         setNotifications(notificationsRes.data || []);
       } catch (error) {
-        console.error('Failed to load dashboard:', error);
-        setError('Error loading dashboard. Please try again.');
+        console.error('❌ Failed to load dashboard:', error);
+        const errorMsg = error.response?.data?.detail || error.message || 'Error loading dashboard. Please try again.';
+        setError(errorMsg);
       } finally {
         setLoading(false);
       }

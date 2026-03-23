@@ -1,0 +1,63 @@
+{
+  "name": "SSC - Sculpt Soft Cricketers",
+  "short_name": "SSC",
+  "description": "Cricket scoring app for match management, team setup, and live scoring",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#0f6f62",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%230f6f62' width='192' height='192'/><text x='50%' y='50%' font-size='120' font-weight='bold' fill='white' text-anchor='middle' dy='0.3em'>SSC</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%230f6f62' width='512' height='512'/><text x='50%' y='50%' font-size='320' font-weight='bold' fill='white' text-anchor='middle' dy='0.3em'>SSC</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect fill='%23eef4f3' width='540' height='720'/><text x='270' y='360' font-size='80' font-weight='bold' fill='%230f6f62' text-anchor='middle' dy='0.3em'>SSC Cricket Scores</text></svg>",
+      "sizes": "540x720",
+      "type": "image/svg+xml",
+      "form_factor": "narrow"
+    }
+  ],
+  "categories": ["sports"],
+  "shortcuts": [
+    {
+      "name": "Create Match",
+      "short_name": "Create Match",
+      "description": "Create a new cricket match",
+      "url": "/?step=create-match",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect fill='%230f6f62' width='96' height='96' rx='20'/><text x='48' y='48' font-size='60' font-weight='bold' fill='white' text-anchor='middle' dy='0.3em'>+</text></svg>",
+          "sizes": "96x96",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Live Scores",
+      "short_name": "Scores",
+      "description": "View live match scores",
+      "url": "/?tab=scores",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect fill='%230f6f62' width='96' height='96' rx='20'/><text x='48' y='48' font-size='60' font-weight='bold' fill='white' text-anchor='middle' dy='0.3em'>🏏</text></svg>",
+          "sizes": "96x96",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false
+}

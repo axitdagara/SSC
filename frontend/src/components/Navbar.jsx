@@ -1,14 +1,13 @@
 import React from 'react';
 import styles from './navbar.module.css';
 import { Link, useNavigate } from 'react-router-dom';
+import { authService } from '../utils/api';
 
 export function Navbar({ isAuthenticated, user }) {
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    window.dispatchEvent(new Event('authchange'));
+  const handleLogout = async () => {
+    await authService.logout();
     navigate('/');
   };
 

@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 
 class PerformanceLogCreate(BaseModel):
@@ -25,7 +25,7 @@ class PerformanceLogUpdate(BaseModel):
 
 class PerformanceLogResponse(BaseModel):
     id: int
-    user_id: int
+    user_id: Union[int, str]
     match_date: datetime
     runs_scored: int
     wickets_taken: int
