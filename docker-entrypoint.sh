@@ -17,7 +17,7 @@ EOF
 # Start backend in background
 echo "Starting backend..."
 cd /app/backend
-gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 1 --timeout 120 &
+gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 1 --timeout 120 --access-logfile - --error-logfile - --capture-output --log-level info &
 BACKEND_PID=$!
 
 # Give backend time to start
