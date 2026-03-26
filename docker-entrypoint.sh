@@ -1,6 +1,16 @@
 #!/bin/bash
 set -e
 
+BACKEND_PID=""
+
+cleanup() {
+	if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
+		kill "$BACKEND_PID" 2>/dev/null || true
+	fi
+}
+
+trap cleanup EXIT INT TERM
+
 # Expose selected runtime env vars to the browser for static frontend builds.
 cat > /app/frontend/dist/env.js <<EOF
 window.__ENV__ = {
@@ -17,16 +27,10 @@ EOF
 # Start backend in background
 echo "Starting backend..."
 cd /app/backend
-gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 1 --timeout 120 --access-logfile - --error-logfile - --capture-output --log-level info &
+gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 1 --timeout 90 --access-logfile - --error-logfile - --capture-output --log-level info &
 BACKEND_PID=$!
-
-# Give backend time to start
-sleep 2
 
 # Start Nginx in foreground
 echo "Starting Nginx..."
 cd /app
-nginx -g "daemon off;"
-
-# Cleanup on exit
-trap "kill $BACKEND_PID" EXIT
+exec nginx -g "daemon off;"

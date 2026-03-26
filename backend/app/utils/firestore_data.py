@@ -56,9 +56,9 @@ def _client() -> MongoClient:
             settings.MONGODB_URI,
             tz_aware=True,
             tlsCAFile=certifi.where(),
-            serverSelectionTimeoutMS=10000,
-            connectTimeoutMS=10000,
-            socketTimeoutMS=20000,
+            serverSelectionTimeoutMS=settings.MONGODB_SERVER_SELECTION_TIMEOUT_MS,
+            connectTimeoutMS=settings.MONGODB_CONNECT_TIMEOUT_MS,
+            socketTimeoutMS=settings.MONGODB_SOCKET_TIMEOUT_MS,
         )
         # Force an early connectivity check so failures surface clearly in API responses.
         _mongo_client.admin.command("ping")

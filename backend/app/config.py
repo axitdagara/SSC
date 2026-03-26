@@ -63,6 +63,18 @@ class Settings(BaseSettings):
     # MongoDB data store
     MONGODB_URI: str = env_first(["MONGODB_URI", "MONGODBURI"], "")
     MONGODB_DB_NAME: str = env_first(["MONGODB_DB_NAME", "MONGODBDBNAME"], "ssc")
+    MONGODB_SERVER_SELECTION_TIMEOUT_MS: int = env_first_int(
+        ["MONGODB_SERVER_SELECTION_TIMEOUT_MS", "MONGODBSERVERSELECTIONTIMEOUTMS"],
+        3000,
+    )
+    MONGODB_CONNECT_TIMEOUT_MS: int = env_first_int(
+        ["MONGODB_CONNECT_TIMEOUT_MS", "MONGODBCONNECTTIMEOUTMS"],
+        3000,
+    )
+    MONGODB_SOCKET_TIMEOUT_MS: int = env_first_int(
+        ["MONGODB_SOCKET_TIMEOUT_MS", "MONGODBSOCKETTIMEOUTMS"],
+        5000,
+    )
 
     # Firebase Auth integration
     FIREBASE_AUTH_ENABLED: bool = env_first_bool(
