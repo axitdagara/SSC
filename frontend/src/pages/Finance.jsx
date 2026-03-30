@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { financeService } from '../utils/api';
+import { FinancePageSkeleton } from '../components/Skeleton';
 import styles from './finance.module.css';
 
 export function FinancePage() {
@@ -82,7 +83,7 @@ export function FinancePage() {
     }
   };
 
-  if (loading) return <div className={styles.loading}>Loading finance dashboard...</div>;
+  if (loading) return <FinancePageSkeleton />;
   if (error) return <div className={styles.error}>{error}</div>;
 
   return (

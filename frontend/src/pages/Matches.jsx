@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { matchesService, playerService } from '../utils/api';
+import { MatchesPageSkeleton } from '../components/Skeleton';
 import styles from './matches.module.css';
 
 export function MatchesPage() {
@@ -47,6 +48,7 @@ export function MatchesPage() {
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [showUmpireGuide, setShowUmpireGuide] = useState(true);
   const [showMatchHistory, setShowMatchHistory] = useState(false);
   const [matchHistoryData, setMatchHistoryData] = useState([]);
@@ -103,6 +105,7 @@ export function MatchesPage() {
 
   const fetchBase = async () => {
     try {
+      setInitialLoading(true);
       const [matchRes, playerRes] = await Promise.all([
         matchesService.listMatches(),
         playerService.getAllPlayers(0, 200),
@@ -111,6 +114,8 @@ export function MatchesPage() {
       setPlayers((playerRes.data || []).filter((p) => p.role === 'player'));
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load match data');
+    } finally {
+      setInitialLoading(false);
     }
   };
 
@@ -413,7 +418,10 @@ export function MatchesPage() {
   };
 
   return (
-    <div className={styles.page}>
+    <>
+      {initialLoading && <MatchesPageSkeleton />}
+      {!initialLoading && (
+        <div className={styles.page}>
       <div className={styles.container}>
         <h1>Live Match Center</h1>
         <p className={styles.subtitle}>Premium creators can set teams and track ball-by-ball scoring in real time.</p>
@@ -1174,5 +1182,7 @@ export function MatchesPage() {
         )}
       </div>
     </div>
+      )}
+    </>
   );
 }

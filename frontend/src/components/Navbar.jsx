@@ -15,11 +15,21 @@ export function Navbar({ isAuthenticated, user }) {
 
     try {
       setIsLoggingOut(true);
-      authService.logout();
+      // Clear auth data first
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       sessionStorage.setItem('suppressSocialAutoLogin', '1');
-      window.location.replace('/login');
+      
+      // Call logout API
+      authService.logout().catch(() => null); // Ignore errors
+      
+      // Dispatch auth change event to notify App component
+      window.dispatchEvent(new Event('authchange'));
+      
+      // Small delay to ensure state updates before redirect
+      setTimeout(() => {
+        window.location.replace('/login');
+      }, 100);
     } finally {
       setIsLoggingOut(false);
     }

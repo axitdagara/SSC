@@ -11,9 +11,25 @@ import { AdminPage } from './pages/Admin';
 import { MatchesPage } from './pages/Matches';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Initialize auth state synchronously from localStorage
+  const initializeAuth = () => {
+    const token = localStorage.getItem('token');
+    const userData = localStorage.getItem('user');
+    
+    if (token && userData) {
+      try {
+        return { isAuthenticated: true, user: JSON.parse(userData) };
+      } catch {
+        return { isAuthenticated: false, user: null };
+      }
+    }
+    return { isAuthenticated: false, user: null };
+  };
+
+  const initialAuth = initializeAuth();
+  const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
+  const [user, setUser] = useState(initialAuth.user);
+  const [isLoading, setIsLoading] = useState(false);
   const isAdmin = user?.role === 'admin';
 
   const updateAuthState = () => {
@@ -22,8 +38,13 @@ function App() {
     const userData = localStorage.getItem('user');
     
     if (token && userData) {
-      setIsAuthenticated(true);
-      setUser(JSON.parse(userData));
+      try {
+        setIsAuthenticated(true);
+        setUser(JSON.parse(userData));
+      } catch {
+        setIsAuthenticated(false);
+        setUser(null);
+      }
     } else {
       setIsAuthenticated(false);
       setUser(null);
@@ -31,10 +52,6 @@ function App() {
   };
 
   useEffect(() => {
-    // Initial auth check from localStorage
-    updateAuthState();
-    setIsLoading(false);
-
     // Listen for auth changes (login, logout)
     const handleAuthChange = () => {
       updateAuthState();

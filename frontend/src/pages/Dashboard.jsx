@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { dashboardService, notificationService } from '../utils/api';
+import { DashboardPageSkeleton } from '../components/Skeleton';
 import styles from './dashboard.module.css';
 
 export function DashboardPage() {
@@ -93,7 +94,7 @@ export function DashboardPage() {
     fetchData();
   }, []);
 
-  if (loading) return <div className={styles.loading}>Loading...</div>;
+  if (loading) return <DashboardPageSkeleton />;
   if (error) return <div className={styles.error}>{error}</div>;
 
   const topRuns = chartData.top_players_runs || [];

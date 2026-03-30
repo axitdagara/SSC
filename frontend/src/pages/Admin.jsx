@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { adminService } from '../utils/api';
+import { AdminPageSkeleton } from '../components/Skeleton';
 import styles from './admin.module.css';
 
 const USERS_PER_PAGE = 10;
@@ -257,7 +258,7 @@ export function AdminPage() {
     }
   };
 
-  if (loading) return <div className={styles.loading}>Loading admin dashboard...</div>;
+  if (loading) return <AdminPageSkeleton />;
 
   if (!isAdmin) {
     return (

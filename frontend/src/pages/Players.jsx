@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { playerService } from '../utils/api';
 import { Link } from 'react-router-dom';
+import { PlayersPageSkeleton } from '../components/Skeleton';
 import styles from './players.module.css';
 
 export function PlayersPage() {
@@ -45,7 +46,7 @@ export function PlayersPage() {
       return b.runs - a.runs;
     });
 
-  if (loading) return <div className={styles.loading}>Loading players...</div>;
+  if (loading) return <PlayersPageSkeleton />;
 
   return (
     <div className={styles.playersPage}>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { playerService, performanceService, premiumService, adminService } from '../utils/api';
 import { useParams } from 'react-router-dom';
+import { ProfilePageSkeleton } from '../components/Skeleton';
 import styles from './profile.module.css';
 
 export function ProfilePage() {
@@ -138,7 +139,7 @@ export function ProfilePage() {
     }
   };
 
-  if (loading) return <div className={styles.loading}>Loading profile...</div>;
+  if (loading) return <ProfilePageSkeleton />;
 
   return (
     <div className={styles.profilePage}>
