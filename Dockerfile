@@ -32,10 +32,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install Nginx
+# Install Nginx and curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	nginx \
 	ca-certificates \
+	curl \
 	&& rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python dependencies

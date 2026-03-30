@@ -72,6 +72,11 @@ def _client() -> MongoClient:
     return _mongo_client
 
 
+def init_db() -> MongoClient:
+    """Initialize and return MongoDB connection. Safe to call multiple times."""
+    return _client()
+
+
 def _collection(name: str) -> Collection:
     db = _client()[_mongo_db_name()]
     return db[name]

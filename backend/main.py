@@ -6,7 +6,8 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.middleware import LoggingMiddleware, RateLimitMiddleware
 from app.middleware.auth import security
-from app.utils.firestore_data import DatabaseUnavailableError
+from app.utils.firestore_data import DatabaseUnavailableError, init_db
+from app.utils.logger import logger
 from app.routes import (
     auth_router,
     players_router,
@@ -51,6 +52,18 @@ app.include_router(admin_router)
 app.include_router(finance_router)
 app.include_router(notifications_router)
 app.include_router(matches_router)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database connection on startup"""
+    logger.info("🚀 Running startup initialization...")
+    try:
+        init_db()
+        logger.info("✅ Database connected and ready")
+    except Exception as e:
+        logger.error(f"❌ DB init failed: {str(e)}")
+        # Continue anyway - routes will handle connection errors
 
 
 @app.get("/")

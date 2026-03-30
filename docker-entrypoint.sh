@@ -27,8 +27,23 @@ EOF
 # Start backend in background
 echo "Starting backend..."
 cd /app/backend
-gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 1 --timeout 90 --access-logfile - --error-logfile - --capture-output --log-level info &
+gunicorn main:app \
+  -k uvicorn.workers.UvicornWorker \
+  --bind 0.0.0.0:8000 \
+  --workers 2 \
+  --threads 2 \
+  --timeout 30 \
+  --preload \
+  --access-logfile - \
+  --error-logfile - \
+  --capture-output \
+  --log-level info &
 BACKEND_PID=$!
+
+# Warmup backend
+echo "Warming up backend..."
+sleep 3
+curl -s http://127.0.0.1:8000/health || true
 
 # Start Nginx in foreground
 echo "Starting Nginx..."
