@@ -42,16 +42,18 @@ app.add_middleware(
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(RateLimitMiddleware)
 
+API_PREFIX = "/api"
+
 # Include routers
-app.include_router(auth_router)
-app.include_router(players_router)
-app.include_router(premium_router)
-app.include_router(performance_router)
-app.include_router(dashboard_router)
-app.include_router(admin_router)
-app.include_router(finance_router)
-app.include_router(notifications_router)
-app.include_router(matches_router)
+app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(players_router, prefix=API_PREFIX)
+app.include_router(premium_router, prefix=API_PREFIX)
+app.include_router(performance_router, prefix=API_PREFIX)
+app.include_router(dashboard_router, prefix=API_PREFIX)
+app.include_router(admin_router, prefix=API_PREFIX)
+app.include_router(finance_router, prefix=API_PREFIX)
+app.include_router(notifications_router, prefix=API_PREFIX)
+app.include_router(matches_router, prefix=API_PREFIX)
 
 
 @app.on_event("startup")
@@ -78,6 +80,7 @@ async def root():
 
 
 @app.get("/health")
+@app.get(f"{API_PREFIX}/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
